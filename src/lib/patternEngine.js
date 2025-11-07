@@ -27,7 +27,11 @@ export class SeededRandom {
 export const shapes = {
   circle: (x, y, size) => ({
     type: 'circle',
-    attrs: { cx: x, cy: y, r: size / 2 }
+    attrs: { 
+      cx: Math.round(x), 
+      cy: Math.round(y), 
+      r: Math.round(size / 2) 
+    }
   }),
 
   square: (x, y, size) => ({
@@ -56,10 +60,11 @@ export const shapes = {
 
   hexagon: (x, y, size) => {
     const angle = Math.PI / 3;
+    const radius = size / 2;
     const points = [];
     for (let i = 0; i < 6; i++) {
-      const px = x + (size / 2) * Math.cos(angle * i);
-      const py = y + (size / 2) * Math.sin(angle * i);
+      const px = Math.round(x + radius * Math.cos(angle * i));
+      const py = Math.round(y + radius * Math.sin(angle * i));
       points.push([px, py]);
     }
     return {
@@ -69,11 +74,12 @@ export const shapes = {
   },
 
   diamond: (x, y, size) => {
+    const halfSize = size / 2;
     const points = [
-      [x, y - size / 2],
-      [x + size / 2, y],
-      [x, y + size / 2],
-      [x - size / 2, y]
+      [Math.round(x), Math.round(y - halfSize)],
+      [Math.round(x + halfSize), Math.round(y)],
+      [Math.round(x), Math.round(y + halfSize)],
+      [Math.round(x - halfSize), Math.round(y)]
     ];
     return {
       type: 'polygon',
@@ -97,27 +103,53 @@ export const shapes = {
 export const patternGenerators = {
   grid: (config, rng) => {
     const elements = [];
-    const { canvasSize, scale, spacing, shapes: selectedShapes, colors, rotation } = config;
+    const { canvasSize, shapeSize, spacing, edgePadding, clipAtEdge, shapes: selectedShapes, colors, rotation } = config;
     
-    const baseSize = 50 * scale;
-    const cellSize = baseSize + spacing;
-    // Add tiny overlap when spacing is 0 to prevent rendering gaps
-    const overlap = spacing === 0 ? 0.5 : 0;
-    const shapeSize = baseSize + overlap;
-    // Use Math.ceil to ensure canvas is fully covered (shapes may extend beyond, will be cropped by viewBox)
-    const cols = Math.ceil(canvasSize[0] / cellSize);
-    const rows = Math.ceil(canvasSize[1] / cellSize);
+    // Calculate inner area (canvas minus edge padding)
+    const innerWidth = canvasSize[0] - (edgePadding * 2);
+    const innerHeight = canvasSize[1] - (edgePadding * 2);
+    
+    let actualShapeSize = shapeSize;
+    let actualSpacing = spacing;
+    let cellSize = shapeSize + spacing;
+    
+    // If clipAtEdge is false, scale down to fit perfectly within inner area
+    if (!clipAtEdge && edgePadding > 0) {
+      // Calculate how many complete cells fit
+      const cols = Math.floor(innerWidth / cellSize);
+      const rows = Math.floor(innerHeight / cellSize);
+      
+      if (cols > 0 && rows > 0) {
+        // Calculate actual cell size that fits perfectly
+        const actualCellSizeX = innerWidth / cols;
+        const actualCellSizeY = innerHeight / rows;
+        const actualCellSize = Math.min(actualCellSizeX, actualCellSizeY);
+        
+        // Calculate scale factor
+        const scaleFactor = actualCellSize / cellSize;
+        
+        // Scale shapeSize and spacing proportionally
+        actualShapeSize = shapeSize * scaleFactor;
+        actualSpacing = spacing * scaleFactor;
+        cellSize = actualShapeSize + actualSpacing;
+      }
+    }
+    
+    // Use Math.ceil when clipping, Math.floor when not clipping
+    const cols = clipAtEdge ? Math.ceil(innerWidth / cellSize) : Math.floor(innerWidth / cellSize);
+    const rows = clipAtEdge ? Math.ceil(innerHeight / cellSize) : Math.floor(innerHeight / cellSize);
 
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
-        // Round positions to avoid sub-pixel rendering issues
-        const x = Math.round(col * cellSize + cellSize / 2);
-        const y = Math.round(row * cellSize + cellSize / 2);
+        // Position at exact pixel coordinates: center of cell, offset by edgePadding
+        const x = Math.round(edgePadding + col * cellSize + actualShapeSize / 2);
+        const y = Math.round(edgePadding + row * cellSize + actualShapeSize / 2);
         
         const shapeType = rng.choice(selectedShapes);
         const color = rng.choice(colors);
         
-        const element = shapes[shapeType](x, y, shapeSize);
+        // Use actualShapeSize (scaled if needed)
+        const element = shapes[shapeType](x, y, actualShapeSize);
         element.fill = color;
         
         if (rotation.enabled) {
@@ -159,31 +191,65 @@ export const patternGenerators = {
 
   brick: (config, rng) => {
     const elements = [];
-    const { canvasSize, scale, spacing, shapes: selectedShapes, colors, rotation } = config;
+    const { canvasSize, shapeSize, spacing, edgePadding, clipAtEdge, shapes: selectedShapes, colors, rotation } = config;
     
-    const baseSize = 50 * scale;
-    const cellSize = baseSize + spacing;
-    // Add tiny overlap when spacing is 0 to prevent rendering gaps
-    const overlap = spacing === 0 ? 0.5 : 0;
-    const shapeSize = baseSize + overlap;
-    // Use Math.ceil to ensure canvas is fully covered (shapes may extend beyond, will be cropped by viewBox)
-    const rows = Math.ceil(canvasSize[1] / cellSize);
+    // Calculate inner area (canvas minus edge padding)
+    const innerWidth = canvasSize[0] - (edgePadding * 2);
+    const innerHeight = canvasSize[1] - (edgePadding * 2);
+    
+    let actualShapeSize = shapeSize;
+    let actualSpacing = spacing;
+    let cellSize = shapeSize + spacing;
+    
+    // If clipAtEdge is false, scale down to fit perfectly within inner area
+    if (!clipAtEdge && edgePadding > 0) {
+      // For brick pattern, calculate based on rows (more complex due to offset)
+      const rows = Math.floor(innerHeight / cellSize);
+      
+      if (rows > 0) {
+        // Calculate actual cell size that fits perfectly in height
+        const actualCellSizeY = innerHeight / rows;
+        
+        // For width, account for offset rows
+        const avgOffset = cellSize / 4; // Average offset per row
+        const effectiveWidth = innerWidth - avgOffset;
+        const cols = Math.floor(effectiveWidth / cellSize);
+        
+        if (cols > 0) {
+          const actualCellSizeX = effectiveWidth / cols;
+          const actualCellSize = Math.min(actualCellSizeY, actualCellSizeX);
+          
+          // Calculate scale factor
+          const scaleFactor = actualCellSize / cellSize;
+          
+          // Scale shapeSize and spacing proportionally
+          actualShapeSize = shapeSize * scaleFactor;
+          actualSpacing = spacing * scaleFactor;
+          cellSize = actualShapeSize + actualSpacing;
+        }
+      }
+    }
+    
+    // Use Math.ceil when clipping, Math.floor when not clipping
+    const rows = clipAtEdge ? Math.ceil(innerHeight / cellSize) : Math.floor(innerHeight / cellSize);
 
     for (let row = 0; row < rows; row++) {
       const offset = row % 2 === 1 ? cellSize / 2 : 0;
-      const cols = Math.ceil((canvasSize[0] + offset) / cellSize);
+      const cols = clipAtEdge ? Math.ceil((innerWidth + offset) / cellSize) : Math.floor((innerWidth + offset) / cellSize);
       
       for (let col = 0; col < cols; col++) {
-        // Round positions to avoid sub-pixel rendering issues
-        const x = Math.round(col * cellSize + cellSize / 2 + offset);
-        const y = Math.round(row * cellSize + cellSize / 2);
+        // Position at exact pixel coordinates: center of cell, offset by edgePadding
+        const x = Math.round(edgePadding + col * cellSize + actualShapeSize / 2 + offset);
+        const y = Math.round(edgePadding + row * cellSize + actualShapeSize / 2);
         
-        if (x > canvasSize[0] || y > canvasSize[1]) continue;
+        // Check bounds within inner area
+        if (x > edgePadding + innerWidth || y > edgePadding + innerHeight) continue;
         
         const shapeType = rng.choice(selectedShapes);
         const color = rng.choice(colors);
         
-        const element = shapes[shapeType](x, y, shapeSize);
+        // Use actualShapeSize (scaled if needed)
+        const element = shapes[shapeType](x, y, actualShapeSize);
         element.fill = color;
         
         if (rotation.enabled) {

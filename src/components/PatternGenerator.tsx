@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DEFAULT_CONFIG, ASPECT_RATIOS, FIXED_SIZES } from '../lib/types';
+import { DEFAULT_CONFIG, ASPECT_RATIOS, FIXED_SIZES, SHAPE_SIZES } from '../lib/types';
 import type { PatternConfig, ShapeType } from '../lib/types';
 import { generatePattern, patternToSVG, calculateCanvasSize } from '../lib/patternEngine';
 import ShapeSelector from './ShapeSelector';
@@ -109,12 +109,11 @@ export default function PatternGenerator() {
   
   const previewCanvasSize = [displayWidth, displayHeight];
 
-  // Handle scale change (integer values only: 1-5)
-  const handleScaleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newScale = parseInt(e.target.value, 10);
+  // Handle shape size change
+  const handleShapeSizeChange = (size: number) => {
     setConfig(prev => ({
       ...prev,
-      scale: newScale,
+      shapeSize: size,
     }));
   };
 
@@ -142,6 +141,23 @@ export default function PatternGenerator() {
     setConfig(prev => ({
       ...prev,
       spacing: newSpacing,
+    }));
+  };
+
+  // Handle edge padding change
+  const handleEdgePaddingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newPadding = parseInt(e.target.value, 10);
+    setConfig(prev => ({
+      ...prev,
+      edgePadding: newPadding,
+    }));
+  };
+
+  // Handle clip at edge toggle
+  const handleClipAtEdgeToggle = () => {
+    setConfig(prev => ({
+      ...prev,
+      clipAtEdge: !prev.clipAtEdge,
     }));
   };
 
@@ -704,21 +720,27 @@ export default function PatternGenerator() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Scale: {config.scale}x
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Shape Size: {config.shapeSize}px
                   </label>
-                  <input
-                    type="range"
-                    min="1"
-                    max="5"
-                    step="1"
-                    value={config.scale}
-                    onChange={handleScaleChange}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
-                    style={{
-                      background: `linear-gradient(to right, #2563eb 0%, #2563eb ${((config.scale - 1) / 4) * 100}%, #e5e7eb ${((config.scale - 1) / 4) * 100}%, #e5e7eb 100%)`
-                    }}
-                  />
+                  <div className="flex flex-wrap gap-2">
+                    {SHAPE_SIZES.map((size) => (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => handleShapeSizeChange(size)}
+                        className={`
+                          px-3 py-1.5 text-sm font-medium rounded-full border-2 transition-all touch-manipulation min-h-[36px]
+                          ${config.shapeSize === size
+                            ? 'border-blue-600 bg-blue-50 text-blue-700'
+                            : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50'
+                          }
+                        `}
+                      >
+                        {size}px
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -736,6 +758,39 @@ export default function PatternGenerator() {
                       background: `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.spacing / 100) * 100}%, #e5e7eb ${(config.spacing / 100) * 100}%, #e5e7eb 100%)`
                     }}
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Edge Padding: {config.edgePadding}px
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="104"
+                    step="8"
+                    value={config.edgePadding}
+                    onChange={handleEdgePaddingChange}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
+                    style={{
+                      background: `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.edgePadding / 104) * 100}%, #e5e7eb ${(config.edgePadding / 104) * 100}%, #e5e7eb 100%)`
+                    }}
+                  />
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.clipAtEdge}
+                      onChange={handleClipAtEdgeToggle}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                    />
+                    <span className="text-sm font-medium text-gray-700">
+                      Clip at Edge
+                    </span>
+                  </label>
+                  <span className="text-xs text-gray-500">
+                    {config.clipAtEdge ? 'Shapes can be clipped' : 'Shapes scale to fit'}
+                  </span>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

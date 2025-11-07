@@ -11,8 +11,10 @@ export interface PatternConfig {
   patternType: PatternType;
   aspectRatio: string;
   fixedSize: [number, number] | null;
-  scale: number;
+  shapeSize: number;
   spacing: number;
+  edgePadding: number;
+  clipAtEdge: boolean;
   backgroundColor: string;
   shapes: ShapeType[];
   colors: string[];
@@ -21,6 +23,8 @@ export interface PatternConfig {
     angle?: number;
   };
 }
+
+export const SHAPE_SIZES = [16, 24, 32, 40, 48, 56, 64, 80, 96];
 
 export interface FixedSize {
   label: string;
@@ -72,8 +76,10 @@ export const DEFAULT_CONFIG: PatternConfig = {
   patternType: 'grid',
   aspectRatio: '1:1',
   fixedSize: null,
-  scale: 1,
+  shapeSize: 48,
   spacing: 10,
+  edgePadding: 0,
+  clipAtEdge: true,
   backgroundColor: '#ffffff',
   shapes: ['circle', 'square'],
   colors: COLOR_PALETTES.vibrant.slice(0, 3),
