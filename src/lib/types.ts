@@ -2,19 +2,18 @@
  * TypeScript types for Pattern Generator
  */
 
-export type PatternType = 'grid' | 'scatter' | 'brick';
+export type PatternType = 'gridCentered' | 'brick';
 
 export type ShapeType = 'circle' | 'square' | 'triangle' | 'hexagon' | 'diamond' | 'roundedSquare';
 
 export interface PatternConfig {
   seed: number;
   patternType: PatternType;
-  aspectRatio: string;
-  fixedSize: [number, number] | null;
-  shapeSize: number;
-  spacing: number;
-  edgePadding: number;
-  clipAtEdge: boolean;
+  containerSize: [number, number];
+  gridSize: number;
+  borderPadding: number;
+  lineSpacing: number;
+  spacing: number; // Keep for now, might remove later
   backgroundColor: string;
   shapes: ShapeType[];
   colors: string[];
@@ -24,39 +23,6 @@ export interface PatternConfig {
   };
 }
 
-export const SHAPE_SIZES = [16, 24, 32, 40, 48, 56, 64, 80, 96];
-
-export interface FixedSize {
-  label: string;
-  width: number;
-  height: number;
-}
-
-export const FIXED_SIZES: FixedSize[] = [
-  { label: '1920×1080', width: 1920, height: 1080 }, // Full HD
-  { label: '1080×1080', width: 1080, height: 1080 }, // Instagram Square
-  { label: '1200×630', width: 1200, height: 630 },   // Social OG Image
-  { label: '1024×768', width: 1024, height: 768 },   // iPad
-  { label: '2560×1440', width: 2560, height: 1440 }, // QHD
-];
-
-export interface AspectRatio {
-  label: string;
-  value: string;
-  ratio: number;
-}
-
-export const ASPECT_RATIOS: AspectRatio[] = [
-  { label: '1:1', value: '1:1', ratio: 1 },
-  { label: '2:1', value: '2:1', ratio: 2 },
-  { label: '1:2', value: '1:2', ratio: 0.5 },
-  { label: '3:4', value: '3:4', ratio: 0.75 },
-  { label: '4:3', value: '4:3', ratio: 1.333 },
-  { label: '9:16', value: '9:16', ratio: 0.5625 },
-  { label: '16:9', value: '16:9', ratio: 1.778 },
-  { label: '4:5', value: '4:5', ratio: 0.8 },
-  { label: '5:4', value: '5:4', ratio: 1.25 },
-];
 
 export const COLOR_PALETTES = {
   vibrant: ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8'],
@@ -73,13 +39,12 @@ export const COLOR_PALETTES = {
 
 export const DEFAULT_CONFIG: PatternConfig = {
   seed: Date.now(),
-  patternType: 'grid',
-  aspectRatio: '1:1',
-  fixedSize: null,
-  shapeSize: 48,
-  spacing: 10,
-  edgePadding: 0,
-  clipAtEdge: true,
+  patternType: 'gridCentered',
+  containerSize: [800, 800],
+  gridSize: 4,
+  borderPadding: 0,
+  lineSpacing: 8,
+  spacing: 10, // Keep for now, might remove later
   backgroundColor: '#ffffff',
   shapes: ['circle', 'square'],
   colors: COLOR_PALETTES.vibrant.slice(0, 3),

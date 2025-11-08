@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { DEFAULT_CONFIG, ASPECT_RATIOS, FIXED_SIZES, SHAPE_SIZES } from '../lib/types';
+import { DEFAULT_CONFIG } from '../lib/types';
 import type { PatternConfig, ShapeType } from '../lib/types';
-import { generatePattern, patternToSVG, calculateCanvasSize } from '../lib/patternEngine';
+import { generatePattern, patternToSVG } from '../lib/patternEngine';
 import ShapeSelector from './ShapeSelector';
 import ColorPickers from './ColorPickers';
 import PaletteSelector from './PaletteSelector';
@@ -24,32 +24,12 @@ export default function PatternGenerator() {
 
   // Regenerate pattern whenever config changes
   useEffect(() => {
-    // If scatter is selected (shouldn't happen, but fallback), default to grid
-    if (config.patternType === 'scatter') {
-      setConfig(prev => {
-        if (prev.patternType === 'scatter') {
-          return { ...prev, patternType: 'grid' };
-        }
-        return prev;
-      });
-      return;
-    }
-
     try {
       setError(null);
-      // Use fixed size if set, otherwise calculate from aspect ratio
-      const renderCanvasSize = config.fixedSize 
-        ? config.fixedSize 
-        : calculateCanvasSize(config.aspectRatio, 2400);
       
-      // Create render config with calculated canvas size
-      const renderConfig = {
-        ...config,
-        canvasSize: renderCanvasSize,
-      };
-      
-      const elements = generatePattern(renderConfig);
-      const svg = patternToSVG(elements, renderCanvasSize, config.backgroundColor);
+      // Use containerSize directly
+      const elements = generatePattern(config);
+      const svg = patternToSVG(elements, config.containerSize, config.backgroundColor);
       setSvgContent(svg);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate pattern';
@@ -83,11 +63,8 @@ export default function PatternGenerator() {
   }, []);
 
   // Calculate preview dimensions that fit within viewport
-  // Render size for pattern generation (use fixed size if set, otherwise calculate from aspect ratio)
-  const renderCanvasSize = config.fixedSize 
-    ? config.fixedSize 
-    : calculateCanvasSize(config.aspectRatio, 2400);
-  const [renderWidth, renderHeight] = renderCanvasSize;
+  // Container is fixed at 800×800px (1:1)
+  const [containerWidth, containerHeight] = config.containerSize;
   
   // Available viewport space (accounting for header ~80px, padding ~32px, frame padding ~64px = ~176px)
   const availableWidth = windowSize.width > 0 ? windowSize.width : (typeof window !== 'undefined' ? window.innerWidth : 1200);
@@ -95,69 +72,27 @@ export default function PatternGenerator() {
   
   // Account for sidebar (if open on mobile) and padding
   const sidebarWidth = availableWidth < 1024 && sidebarOpen ? 320 : 0;
-  const maxDisplayWidth = Math.min(1000, (availableWidth - sidebarWidth) * 0.85);
-  const maxDisplayHeight = Math.min(700, (availableHeight - 200) * 0.85);
+  const maxDisplayWidth = Math.min(800, (availableWidth - sidebarWidth) * 0.85);
+  const maxDisplayHeight = Math.min(800, (availableHeight - 200) * 0.85);
   
   // Calculate scale to fit within container (never scale up, only down)
-  const scaleX = maxDisplayWidth / renderWidth;
-  const scaleY = maxDisplayHeight / renderHeight;
+  const scaleX = maxDisplayWidth / containerWidth;
+  const scaleY = maxDisplayHeight / containerHeight;
   const scale = Math.min(scaleX, scaleY, 1);
   
   // Calculate display dimensions
-  const displayWidth = renderWidth * scale;
-  const displayHeight = renderHeight * scale;
+  const displayWidth = containerWidth * scale;
+  const displayHeight = containerHeight * scale;
   
   const previewCanvasSize = [displayWidth, displayHeight];
 
-  // Handle shape size change
-  const handleShapeSizeChange = (size: number) => {
-    setConfig(prev => ({
-      ...prev,
-      shapeSize: size,
-    }));
-  };
 
-  // Handle fixed size change
-  const handleFixedSizeChange = (width: number, height: number) => {
-    setConfig(prev => ({
-      ...prev,
-      fixedSize: [width, height],
-      aspectRatio: prev.aspectRatio, // Keep aspect ratio for when switching back
-    }));
-  };
-
-  // Handle aspect ratio change (clears fixed size)
-  const handleAspectRatioChange = (aspectRatio: string) => {
-    setConfig(prev => ({
-      ...prev,
-      aspectRatio: aspectRatio,
-      fixedSize: null, // Clear fixed size when switching to aspect ratio
-    }));
-  };
-
-  // Handle spacing change
+  // Handle spacing change (keep for now, might remove later)
   const handleSpacingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newSpacing = parseInt(e.target.value, 10);
     setConfig(prev => ({
       ...prev,
       spacing: newSpacing,
-    }));
-  };
-
-  // Handle edge padding change
-  const handleEdgePaddingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newPadding = parseInt(e.target.value, 10);
-    setConfig(prev => ({
-      ...prev,
-      edgePadding: newPadding,
-    }));
-  };
-
-  // Handle clip at edge toggle
-  const handleClipAtEdgeToggle = () => {
-    setConfig(prev => ({
-      ...prev,
-      clipAtEdge: !prev.clipAtEdge,
     }));
   };
 
@@ -279,8 +214,7 @@ export default function PatternGenerator() {
     
     // Small delay to show loading state
     setTimeout(() => {
-      // Scatter disabled for performance - can be re-enabled later
-      const patternTypes: PatternConfig['patternType'][] = ['grid', 'brick'];
+      const patternTypes: PatternConfig['patternType'][] = ['gridCentered', 'brick'];
       const allShapes: ShapeType[] = ['circle', 'square', 'triangle', 'hexagon', 'diamond', 'roundedSquare'];
       
       // Generate random values
@@ -509,159 +443,21 @@ export default function PatternGenerator() {
           <div className="p-4 md:p-6 space-y-4 md:space-y-6">
             <div>
               <h2 className="text-lg font-semibold mb-4">Pattern Type</h2>
-              <div className="grid grid-cols-2 gap-2">
-                {/* Grid Pattern */}
-                <button
-                  type="button"
-                  onClick={() => handlePatternTypeChange('grid')}
-                  className={`
-                    relative p-3 md:p-3 rounded-lg border-2 transition-all text-left min-h-[60px] touch-manipulation
-                    ${config.patternType === 'grid'
-                      ? 'border-blue-600 bg-blue-50 shadow-sm'
-                      : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm active:bg-gray-50'
-                    }
-                  `}
-                  title="Grid - Regular aligned pattern"
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="w-12 h-12 grid grid-cols-3 gap-1">
-                      {[...Array(9)].map((_, i) => (
-                        <div
-                          key={i}
-                          className="bg-blue-500 rounded-sm"
-                        />
-                      ))}
-                    </div>
-                    <span className="text-xs font-medium text-gray-700">Grid</span>
+              <div className="p-3 rounded-lg border-2 border-blue-600 bg-blue-50">
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-12 h-12 grid grid-cols-3 gap-1">
+                    {[...Array(9)].map((_, i) => (
+                      <div
+                        key={i}
+                        className="bg-blue-500 rounded-sm"
+                      />
+                    ))}
                   </div>
-                  {config.patternType === 'grid' && (
-                    <div className="absolute top-1 right-1">
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="text-blue-600"
-                      >
-                        <circle cx="8" cy="8" r="8" fill="currentColor" />
-                        <path
-                          d="M5 8L7 10L11 6"
-                          stroke="white"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </div>
-                  )}
-                </button>
-
-                {/* Scatter Pattern - DISABLED for performance */}
-                {/* <button
-                  type="button"
-                  onClick={() => handlePatternTypeChange('scatter')}
-                  className={`
-                    relative p-3 rounded-lg border-2 transition-all text-left
-                    ${config.patternType === 'scatter'
-                      ? 'border-blue-600 bg-blue-50 shadow-sm'
-                      : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'
-                    }
-                  `}
-                  title="Scatter - Random distributed pattern"
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="w-12 h-12 relative">
-                      {[
-                        { top: '10%', left: '20%' },
-                        { top: '30%', left: '70%' },
-                        { top: '60%', left: '15%' },
-                        { top: '80%', left: '80%' },
-                        { top: '45%', left: '50%' },
-                      ].map((pos, i) => (
-                        <div
-                          key={i}
-                          className="absolute w-2 h-2 bg-purple-500 rounded-full"
-                          style={pos}
-                        />
-                      ))}
-                    </div>
-                    <span className="text-xs font-medium text-gray-700">Scatter</span>
-                  </div>
-                  {config.patternType === 'scatter' && (
-                    <div className="absolute top-1 right-1">
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="text-blue-600"
-                      >
-                        <circle cx="8" cy="8" r="8" fill="currentColor" />
-                        <path
-                          d="M5 8L7 10L11 6"
-                          stroke="white"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </div>
-                  )}
-                </button> */}
-
-                {/* Brick Pattern */}
-                <button
-                  type="button"
-                  onClick={() => handlePatternTypeChange('brick')}
-                  className={`
-                    relative p-3 md:p-3 rounded-lg border-2 transition-all text-left min-h-[60px] touch-manipulation
-                    ${config.patternType === 'brick'
-                      ? 'border-blue-600 bg-blue-50 shadow-sm'
-                      : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm active:bg-gray-50'
-                    }
-                  `}
-                  title="Brick - Offset staggered pattern"
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="w-12 h-12 relative">
-                      <div className="absolute top-0 left-0 w-5 h-2 bg-orange-500 rounded-sm"></div>
-                      <div className="absolute top-0 right-0 w-5 h-2 bg-orange-500 rounded-sm"></div>
-                      <div className="absolute top-3 left-3 w-5 h-2 bg-orange-500 rounded-sm"></div>
-                      <div className="absolute top-3 right-3 w-5 h-2 bg-orange-500 rounded-sm"></div>
-                      <div className="absolute bottom-3 left-0 w-5 h-2 bg-orange-500 rounded-sm"></div>
-                      <div className="absolute bottom-3 right-0 w-5 h-2 bg-orange-500 rounded-sm"></div>
-                    </div>
-                    <span className="text-xs font-medium text-gray-700">Brick</span>
-                  </div>
-                  {config.patternType === 'brick' && (
-                    <div className="absolute top-1 right-1">
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="text-blue-600"
-                      >
-                        <circle cx="8" cy="8" r="8" fill="currentColor" />
-                        <path
-                          d="M5 8L7 10L11 6"
-                          stroke="white"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </div>
-                  )}
-                </button>
+                  <span className="text-sm font-medium text-gray-700">Grid</span>
+                </div>
               </div>
               <p className="text-xs text-gray-500 mt-2">
-                {config.patternType === 'grid' && 'Regular aligned grid pattern'}
-                {/* {config.patternType === 'scatter' && 'Random distributed pattern'} - Scatter disabled */}
-                {config.patternType === 'brick' && 'Offset staggered brick pattern'}
+                Centered grid pattern with auto-sizing shapes
               </p>
             </div>
 
@@ -670,77 +466,67 @@ export default function PatternGenerator() {
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Aspect Ratio
+                    Grid Size: {config.gridSize}×{config.gridSize}
                   </label>
-                  <div className="flex flex-wrap gap-2">
-                    {ASPECT_RATIOS.map((ratio) => (
-                      <button
-                        key={ratio.value}
-                        type="button"
-                        onClick={() => handleAspectRatioChange(ratio.value)}
-                        className={`
-                          px-3 py-1.5 text-sm font-medium rounded-full border-2 transition-all touch-manipulation min-h-[36px]
-                          ${config.aspectRatio === ratio.value && !config.fixedSize
-                            ? 'border-blue-600 bg-blue-50 text-blue-700'
-                            : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50'
-                          }
-                        `}
-                      >
-                        {ratio.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="pt-4 border-t border-gray-200">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Fixed Sizes
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {FIXED_SIZES.map((size) => {
-                      const isSelected = config.fixedSize && 
-                        config.fixedSize[0] === size.width && 
-                        config.fixedSize[1] === size.height;
-                      return (
-                        <button
-                          key={`${size.width}x${size.height}`}
-                          type="button"
-                          onClick={() => handleFixedSizeChange(size.width, size.height)}
-                          className={`
-                            px-3 py-1.5 text-sm font-medium rounded-full border-2 transition-all touch-manipulation min-h-[36px]
-                            ${isSelected
-                              ? 'border-blue-600 bg-blue-50 text-blue-700'
-                              : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50'
-                            }
-                          `}
-                        >
-                          {size.label}
-                        </button>
-                      );
-                    })}
+                  <input
+                    type="range"
+                    min="2"
+                    max="8"
+                    step="1"
+                    value={config.gridSize}
+                    onChange={(e) => setConfig(prev => ({ 
+                      ...prev, 
+                      gridSize: parseInt(e.target.value) 
+                    }))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
+                    style={{
+                      background: `linear-gradient(to right, #2563eb 0%, #2563eb ${((config.gridSize - 2) / 6) * 100}%, #e5e7eb ${((config.gridSize - 2) / 6) * 100}%, #e5e7eb 100%)`
+                    }}
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>2×2</span>
+                    <span>8×8</span>
                   </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Shape Size: {config.shapeSize}px
+                    Border Padding: {config.borderPadding}px
                   </label>
-                  <div className="flex flex-wrap gap-2">
-                    {SHAPE_SIZES.map((size) => (
-                      <button
-                        key={size}
-                        type="button"
-                        onClick={() => handleShapeSizeChange(size)}
-                        className={`
-                          px-3 py-1.5 text-sm font-medium rounded-full border-2 transition-all touch-manipulation min-h-[36px]
-                          ${config.shapeSize === size
-                            ? 'border-blue-600 bg-blue-50 text-blue-700'
-                            : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50'
-                          }
-                        `}
-                      >
-                        {size}px
-                      </button>
-                    ))}
-                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="64"
+                    step="8"
+                    value={config.borderPadding}
+                    onChange={(e) => setConfig(prev => ({ 
+                      ...prev, 
+                      borderPadding: parseInt(e.target.value) 
+                    }))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
+                    style={{
+                      background: `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.borderPadding / 64) * 100}%, #e5e7eb ${(config.borderPadding / 64) * 100}%, #e5e7eb 100%)`
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Line Spacing: {config.lineSpacing}px
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="64"
+                    step="8"
+                    value={config.lineSpacing}
+                    onChange={(e) => setConfig(prev => ({ 
+                      ...prev, 
+                      lineSpacing: parseInt(e.target.value) 
+                    }))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
+                    style={{
+                      background: `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.lineSpacing / 64) * 100}%, #e5e7eb ${(config.lineSpacing / 64) * 100}%, #e5e7eb 100%)`
+                    }}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -758,39 +544,6 @@ export default function PatternGenerator() {
                       background: `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.spacing / 100) * 100}%, #e5e7eb ${(config.spacing / 100) * 100}%, #e5e7eb 100%)`
                     }}
                   />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Edge Padding: {config.edgePadding}px
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="104"
-                    step="8"
-                    value={config.edgePadding}
-                    onChange={handleEdgePaddingChange}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
-                    style={{
-                      background: `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.edgePadding / 104) * 100}%, #e5e7eb ${(config.edgePadding / 104) * 100}%, #e5e7eb 100%)`
-                    }}
-                  />
-                </div>
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={config.clipAtEdge}
-                      onChange={handleClipAtEdgeToggle}
-                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
-                    />
-                    <span className="text-sm font-medium text-gray-700">
-                      Clip at Edge
-                    </span>
-                  </label>
-                  <span className="text-xs text-gray-500">
-                    {config.clipAtEdge ? 'Shapes can be clipped' : 'Shapes scale to fit'}
-                  </span>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

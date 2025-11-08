@@ -99,8 +99,91 @@ export const shapes = {
   })
 };
 
+// Calculate pattern layout based on new system
+export function calculatePatternLayout(config) {
+  const {
+    containerSize,
+    borderPadding,
+    lineSpacing,
+    gridSize,
+  } = config;
+
+  const patternWidth = containerSize[0] - (borderPadding * 2);
+  const patternHeight = containerSize[1] - (borderPadding * 2);
+
+  const totalHorizontalSpacing = (gridSize - 1) * lineSpacing;
+  const totalVerticalSpacing = (gridSize - 1) * lineSpacing;
+
+  const availableWidth = patternWidth - totalHorizontalSpacing;
+  const availableHeight = patternHeight - totalVerticalSpacing;
+
+  const tileWidth = availableWidth / gridSize;
+  const tileHeight = availableHeight / gridSize;
+  const tileSize = Math.min(tileWidth, tileHeight);
+
+  const actualPatternWidth = (tileSize * gridSize) + totalHorizontalSpacing;
+  const actualPatternHeight = (tileSize * gridSize) + totalVerticalSpacing;
+
+  const offsetX = borderPadding + (patternWidth - actualPatternWidth) / 2;
+  const offsetY = borderPadding + (patternHeight - actualPatternHeight) / 2;
+
+  return {
+    tileSize,
+    offsetX,
+    offsetY,
+    rows: gridSize,
+    cols: gridSize,
+  };
+}
+
+// New centered grid pattern generator
+export function generateCenteredGrid(config, rng) {
+  const {
+    containerSize,
+    borderPadding = 0,
+    lineSpacing = 0,
+    gridSize = 4,
+    shapes: selectedShapes,
+    colors,
+    rotation = { enabled: false }
+  } = config;
+
+  const layout = calculatePatternLayout({
+    containerSize,
+    borderPadding,
+    lineSpacing,
+    gridSize,
+  });
+
+  const elements = [];
+  const { tileSize, offsetX, offsetY, rows, cols } = layout;
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const x = offsetX + (col * (tileSize + lineSpacing)) + (tileSize / 2);
+      const y = offsetY + (row * (tileSize + lineSpacing)) + (tileSize / 2);
+
+      const shapeType = rng.choice(selectedShapes);
+      const color = rng.choice(colors);
+
+      const element = shapes[shapeType](x, y, tileSize);
+      element.fill = color;
+
+      if (rotation.enabled) {
+        element.transform = `rotate(${rng.range(0, 360)} ${x} ${y})`;
+      }
+
+      elements.push(element);
+    }
+  }
+
+  return elements;
+}
+
 // Pattern generators
 export const patternGenerators = {
+  gridCentered: generateCenteredGrid,
+  
   grid: (config, rng) => {
     const elements = [];
     const { canvasSize, shapeSize, spacing, edgePadding, clipAtEdge, shapes: selectedShapes, colors, rotation } = config;
@@ -163,31 +246,6 @@ export const patternGenerators = {
     return elements;
   },
 
-  // Scatter pattern - DISABLED for performance (can be re-enabled later)
-  // scatter: (config, rng) => {
-  //   const elements = [];
-  //   const { canvasSize, scale, spacing, shapes: selectedShapes, colors } = config;
-  //   
-  //   const density = 1 / (scale * 2);
-  //   const count = Math.floor(canvasSize[0] * canvasSize[1] * density);
-
-  //   for (let i = 0; i < count; i++) {
-  //     const x = rng.range(0, canvasSize[0]);
-  //     const y = rng.range(0, canvasSize[1]);
-  //     
-  //     const shapeType = rng.choice(selectedShapes);
-  //     const color = rng.choice(colors);
-  //     const shapeSize = rng.range(20, 60) * scale;
-  //     
-  //     const element = shapes[shapeType](x, y, shapeSize);
-  //     element.fill = color;
-  //     element.transform = `rotate(${rng.range(0, 360)} ${x} ${y})`;
-  //     
-  //     elements.push(element);
-  //   }
-
-  //   return elements;
-  // },
 
   brick: (config, rng) => {
     const elements = [];
@@ -264,26 +322,6 @@ export const patternGenerators = {
   }
 };
 
-// Calculate canvas size from aspect ratio
-export function calculateCanvasSize(aspectRatio, maxSize = 2400) {
-  // Parse aspect ratio string (e.g., "16:9" → width: 16, height: 9)
-  const [widthRatio, heightRatio] = aspectRatio.split(':').map(Number);
-  const ratio = widthRatio / heightRatio;
-  
-  let width, height;
-  
-  if (ratio >= 1) {
-    // Landscape or square: width is the longest side
-    width = maxSize;
-    height = Math.round(maxSize / ratio);
-  } else {
-    // Portrait: height is the longest side
-    height = maxSize;
-    width = Math.round(maxSize * ratio);
-  }
-  
-  return [width, height];
-}
 
 // Main pattern generation function
 export function generatePattern(config) {
