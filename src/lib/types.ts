@@ -4,7 +4,11 @@
 
 export type PatternType = 'gridCentered' | 'brick';
 
-export type ShapeType = 'circle' | 'square' | 'triangle' | 'hexagon' | 'diamond' | 'roundedSquare';
+export type ShapeType = 
+  | 'circle_01' | 'square_01' | 'hexagon_01' | 'triangle_01' | 'triangledouble_01'
+  | 'block33_01' | 'block33_02' | 'block33_03' | 'block33_04' | 'block33_05' 
+  | 'block33_06' | 'block33_07' | 'block33_08' | 'block33_09' | 'block33_10' 
+  | 'block33_12' | 'block33_13';
 
 export interface PatternConfig {
   seed: number;
@@ -20,6 +24,10 @@ export interface PatternConfig {
   rotation: {
     enabled: boolean;
     angle?: number;
+  };
+  mirror?: {
+    horizontal: boolean;
+    vertical: boolean;
   };
 }
 
@@ -44,11 +52,15 @@ export const DEFAULT_CONFIG: PatternConfig = {
   gridSize: 4,
   borderPadding: 0,
   lineSpacing: 8,
-  spacing: 10, // Keep for now, might remove later
+  spacing: 0, // Spacing slider removed - using Line Spacing instead
   backgroundColor: '#ffffff',
-  shapes: ['circle', 'square'],
+  shapes: ['circle_01', 'hexagon_01'],
   colors: COLOR_PALETTES.vibrant.slice(0, 3),
   rotation: {
     enabled: false,
+  },
+  mirror: {
+    horizontal: false,
+    vertical: false,
   },
 };

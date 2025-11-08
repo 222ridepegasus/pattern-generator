@@ -2,7 +2,7 @@
  * Pattern Engine - Core logic for generating patterns
  * Pure JavaScript, framework-agnostic
  */
-
+import { shapes } from './shapeSets.js'; 
 // Seeded random number generator for reproducible patterns
 export class SeededRandom {
   constructor(seed) {
@@ -23,81 +23,7 @@ export class SeededRandom {
   }
 }
 
-// Shape generators - returns SVG path data or elements
-export const shapes = {
-  circle: (x, y, size) => ({
-    type: 'circle',
-    attrs: { 
-      cx: Math.round(x), 
-      cy: Math.round(y), 
-      r: Math.round(size / 2) 
-    }
-  }),
 
-  square: (x, y, size) => ({
-    type: 'rect',
-    attrs: { 
-      x: Math.round(x - size / 2), 
-      y: Math.round(y - size / 2), 
-      width: Math.round(size), 
-      height: Math.round(size) 
-    }
-  }),
-
-  triangle: (x, y, size) => {
-    // Make triangle fill the square cell by using full size for both dimensions
-    const halfSize = size / 2;
-    const points = [
-      [Math.round(x), Math.round(y - halfSize)],           // Top point
-      [Math.round(x - halfSize), Math.round(y + halfSize)], // Bottom left
-      [Math.round(x + halfSize), Math.round(y + halfSize)]  // Bottom right
-    ];
-    return {
-      type: 'polygon',
-      attrs: { points: points.map(p => p.join(',')).join(' ') }
-    };
-  },
-
-  hexagon: (x, y, size) => {
-    const angle = Math.PI / 3;
-    const radius = size / 2;
-    const points = [];
-    for (let i = 0; i < 6; i++) {
-      const px = Math.round(x + radius * Math.cos(angle * i));
-      const py = Math.round(y + radius * Math.sin(angle * i));
-      points.push([px, py]);
-    }
-    return {
-      type: 'polygon',
-      attrs: { points: points.map(p => p.join(',')).join(' ') }
-    };
-  },
-
-  diamond: (x, y, size) => {
-    const halfSize = size / 2;
-    const points = [
-      [Math.round(x), Math.round(y - halfSize)],
-      [Math.round(x + halfSize), Math.round(y)],
-      [Math.round(x), Math.round(y + halfSize)],
-      [Math.round(x - halfSize), Math.round(y)]
-    ];
-    return {
-      type: 'polygon',
-      attrs: { points: points.map(p => p.join(',')).join(' ') }
-    };
-  },
-
-  roundedSquare: (x, y, size) => ({
-    type: 'rect',
-    attrs: {
-      x: Math.round(x - size / 2),
-      y: Math.round(y - size / 2),
-      width: Math.round(size),
-      height: Math.round(size),
-      rx: Math.round(size * 0.2)
-    }
-  })
-};
 
 // Calculate pattern layout based on new system
 export function calculatePatternLayout(config) {
@@ -166,9 +92,23 @@ export function generateCenteredGrid(config, rng) {
       const shapeType = rng.choice(selectedShapes);
       const color = rng.choice(colors);
 
-      const element = shapes[shapeType](x, y, tileSize);
+      // Random flip per shape (when flip is enabled)
+      let flipH = 1;
+      let flipV = 1;
+
+      if (config.mirror?.horizontal) {
+        flipH = rng.next() > 0.5 ? -1 : 1; // 50% chance to flip
+      }
+
+      if (config.mirror?.vertical) {
+        flipV = rng.next() > 0.5 ? -1 : 1; // 50% chance to flip
+      }
+
+      // Generate shape with flip parameters
+      const element = shapes[shapeType](x, y, tileSize, flipH, flipV);
       element.fill = color;
 
+      // Add rotation if enabled
       if (rotation.enabled) {
         element.transform = `rotate(${rng.range(0, 360)} ${x} ${y})`;
       }

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DEFAULT_CONFIG } from '../lib/types';
 import type { PatternConfig, ShapeType } from '../lib/types';
 import { generatePattern, patternToSVG } from '../lib/patternEngine';
+import { shapeSets } from '../lib/shapeSets.js';
 import ShapeSelector from './ShapeSelector';
 import ColorPickers from './ColorPickers';
 import PaletteSelector from './PaletteSelector';
@@ -189,6 +190,14 @@ export default function PatternGenerator() {
     handleColorsChange(newColors);
   };
 
+  // Handle randomize pattern (new seed, keeps colors)
+  const handleRandomizePattern = () => {
+    setConfig(prev => ({
+      ...prev,
+      seed: Date.now(), // New random seed
+    }));
+  };
+
   // Handle pattern type change
   const handlePatternTypeChange = (patternType: PatternConfig['patternType']) => {
     setConfig(prev => ({
@@ -215,7 +224,11 @@ export default function PatternGenerator() {
     // Small delay to show loading state
     setTimeout(() => {
       const patternTypes: PatternConfig['patternType'][] = ['gridCentered', 'brick'];
-      const allShapes: ShapeType[] = ['circle', 'square', 'triangle', 'hexagon', 'diamond', 'roundedSquare'];
+      // Get all available shapes from shapeSets
+      const allShapes: ShapeType[] = [
+        ...Object.keys(shapeSets.primitives.shapes),
+        ...Object.keys(shapeSets.blocks33.shapes)
+      ] as ShapeType[];
       
       // Generate random values
       const newSeed = Date.now();
@@ -319,96 +332,20 @@ export default function PatternGenerator() {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="lg:hidden p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-              aria-label="Toggle sidebar"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-            <h1 className="text-xl md:text-2xl font-bold text-gray-900">Pattern Generator</h1>
-          </div>
-          <div className="flex items-center gap-2 md:gap-3">
-            {exportMessage && (
-              <div className="hidden sm:block px-3 md:px-4 py-2 bg-green-100 text-green-700 rounded-lg text-xs md:text-sm font-medium transition-opacity">
-                {exportMessage}
-              </div>
-            )}
-            <button className="px-3 md:px-4 py-2 text-sm md:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 min-h-[44px] touch-manipulation">
-              <span className="hidden sm:inline">Export PNG</span>
-              <span className="sm:hidden">PNG</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleCopySVG}
-              className="px-3 md:px-4 py-2 text-sm md:text-base bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2 min-h-[44px] touch-manipulation"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-              <span className="hidden sm:inline">Copy SVG</span>
-              <span className="sm:hidden">Copy</span>
-            </button>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowSvgMenu(!showSvgMenu)}
-                className="px-3 md:px-4 py-2 text-sm md:text-base bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 min-h-[44px] touch-manipulation"
-              >
-                Export SVG
-                <svg
-                  className={`w-4 h-4 transition-transform ${showSvgMenu ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {showSvgMenu && (
-                <>
-                  <div
-                    className="fixed inset-0 z-10"
-                    onClick={() => setShowSvgMenu(false)}
-                  />
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-20 py-1">
-                    <button
-                      type="button"
-                      onClick={handleDownloadSVG}
-                      className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                      Download SVG
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCopySVG}
-                      className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                      Copy SVG
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </header>
-
+      {/* Mobile Menu Button */}
+      <button
+        type="button"
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 text-gray-600 hover:text-gray-900 hover:bg-white rounded-lg transition-colors shadow-lg bg-white"
+        aria-label="Toggle sidebar"
+      >
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+      
       {/* Main Layout */}
-      <div className="flex flex-col lg:flex-row h-[calc(100vh-73px)]">
+      <div className="flex flex-col lg:flex-row h-screen">
         {/* Mobile Sidebar Overlay */}
         {sidebarOpen && (
           <div
@@ -424,7 +361,6 @@ export default function PatternGenerator() {
             w-80 bg-white border-r border-gray-200 overflow-y-auto
             transform transition-transform duration-300 ease-in-out
             ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-            pt-16 lg:pt-0
           `}
         >
           {/* Mobile Close Button */}
@@ -441,7 +377,8 @@ export default function PatternGenerator() {
             </button>
           </div>
           <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-            <div>
+            {/* Pattern Type - Hidden for now, will add back when we have multiple types */}
+            {/* <div>
               <h2 className="text-lg font-semibold mb-4">Pattern Type</h2>
               <div className="p-3 rounded-lg border-2 border-blue-600 bg-blue-50">
                 <div className="flex flex-col items-center gap-2">
@@ -459,10 +396,9 @@ export default function PatternGenerator() {
               <p className="text-xs text-gray-500 mt-2">
                 Centered grid pattern with auto-sizing shapes
               </p>
-            </div>
+            </div> */}
 
             <div>
-              <h2 className="text-lg font-semibold mb-4">Canvas</h2>
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -528,23 +464,7 @@ export default function PatternGenerator() {
                     }}
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Spacing: {config.spacing}px
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={config.spacing}
-                    onChange={handleSpacingChange}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
-                    style={{
-                      background: `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.spacing / 100) * 100}%, #e5e7eb ${(config.spacing / 100) * 100}%, #e5e7eb 100%)`
-                    }}
-                  />
-                </div>
+                {/* Spacing slider removed - using Line Spacing instead */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Background Color
@@ -570,6 +490,48 @@ export default function PatternGenerator() {
                 selectedShapes={config.shapes}
                 onSelectionChange={handleShapesChange}
               />
+              <div className="mt-4 pt-4 border-t border-gray-200 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.mirror?.horizontal || false}
+                    onChange={(e) => setConfig(prev => ({
+                      ...prev,
+                      mirror: {
+                        ...(prev.mirror || { horizontal: false, vertical: false }),
+                        horizontal: e.target.checked
+                      }
+                    }))}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Mirror Horizontally</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.mirror?.vertical || false}
+                    onChange={(e) => setConfig(prev => ({
+                      ...prev,
+                      mirror: {
+                        ...(prev.mirror || { horizontal: false, vertical: false }),
+                        vertical: e.target.checked
+                      }
+                    }))}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Mirror Vertically</span>
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <button
+                type="button"
+                onClick={handleRandomizePattern}
+                className="w-full mb-4 px-4 py-3 text-sm font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors border border-purple-200 min-h-[44px] touch-manipulation"
+              >
+                🎲 Randomize Pattern
+              </button>
             </div>
 
             <div>
@@ -592,7 +554,6 @@ export default function PatternGenerator() {
             </div>
 
             <div>
-              <h2 className="text-lg font-semibold mb-4">Rotation</h2>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
@@ -666,8 +627,78 @@ export default function PatternGenerator() {
                 )}
               </button>
               
+              {/* Export Buttons */}
+              <div className="mt-4 pt-4 border-t border-gray-200 space-y-2">
+                {exportMessage && (
+                  <div className="px-3 py-2 bg-green-100 text-green-700 rounded-lg text-xs font-medium transition-opacity">
+                    {exportMessage}
+                  </div>
+                )}
+                <button className="w-full px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 min-h-[44px] touch-manipulation">
+                  Export PNG
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopySVG}
+                  className="w-full px-3 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2 min-h-[44px] touch-manipulation"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  Copy SVG
+                </button>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowSvgMenu(!showSvgMenu)}
+                    className="w-full px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center justify-center gap-2 min-h-[44px] touch-manipulation"
+                  >
+                    Export SVG
+                    <svg
+                      className={`w-4 h-4 transition-transform ${showSvgMenu ? 'rotate-180' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {showSvgMenu && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setShowSvgMenu(false)}
+                      />
+                      <div className="absolute left-0 mt-2 w-full bg-white rounded-lg shadow-lg border border-gray-200 z-20 py-1">
+                        <button
+                          type="button"
+                          onClick={handleDownloadSVG}
+                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                          </svg>
+                          Download SVG
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCopySVG}
+                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          Copy SVG
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+              
+              {/* Pattern Seed - Hidden for now, will add back later */}
               {/* Seed Display and Input */}
-              <div className="mt-4 pt-4 border-t border-gray-200">
+              {/* <div className="mt-4 pt-4 border-t border-gray-200">
                 <div className="mb-2">
                   <label className="block text-xs font-medium text-gray-500 mb-1">
                     Pattern Seed
@@ -706,7 +737,7 @@ export default function PatternGenerator() {
                 <p className="text-xs text-gray-400 mt-1">
                   Use seed to reproduce patterns
                 </p>
-              </div>
+              </div> */}
             </div>
           </div>
         </aside>

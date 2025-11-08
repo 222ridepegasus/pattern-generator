@@ -13,7 +13,7 @@ export default function ColorPickers({ colors, onColorsChange }: ColorPickersPro
   };
 
   const handleRemoveColor = (index: number) => {
-    if (colors.length > 2) {
+    if (colors.length > 1) {
       const updatedColors = colors.filter((_, i) => i !== index);
       onColorsChange(updatedColors);
     }
@@ -56,15 +56,15 @@ export default function ColorPickers({ colors, onColorsChange }: ColorPickersPro
           <button
             type="button"
             onClick={() => handleRemoveColor(index)}
-            disabled={colors.length <= 2}
+            disabled={colors.length <= 1}
             className={`
               px-3 py-2 text-sm font-medium rounded-lg transition-colors flex-shrink-0
-              ${colors.length <= 2
+              ${colors.length <= 1
                 ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                 : 'bg-red-50 text-red-600 hover:bg-red-100'
               }
             `}
-            title={colors.length <= 2 ? 'Minimum 2 colors required' : 'Remove color'}
+            title={colors.length <= 1 ? 'Minimum 1 color required' : 'Remove color'}
           >
             Remove
           </button>

@@ -1,71 +1,46 @@
 import React from 'react';
 import type { ShapeType } from '../lib/types';
+import { shapeSets } from '../lib/shapeSets.js';
 
 interface ShapeSelectorProps {
   selectedShapes: ShapeType[];
   onSelectionChange: (shapes: ShapeType[]) => void;
 }
 
-const ALL_SHAPES: ShapeType[] = ['circle', 'square', 'triangle', 'hexagon', 'diamond', 'roundedSquare'];
+// Render shape preview as mini SVG
+const renderShapePreview = (shapeName: ShapeType, shapeFunction: Function) => {
+  // Generate shape at center of 64x64 canvas
+  const shapeData = shapeFunction(32, 32, 48);
+  
+  // Convert to SVG element
+  const attrs = Object.entries(shapeData.attrs)
+    .map(([key, val]) => `${key}="${val}"`)
+    .join(' ');
+  
+  const svgContent = `<${shapeData.type} ${attrs} fill="currentColor" />`;
+  
+  return (
+    <svg 
+      viewBox="0 0 64 64" 
+      className="w-full h-full"
+      dangerouslySetInnerHTML={{ __html: svgContent }}
+    />
+  );
+};
 
-// SVG previews for each shape
-const ShapeIcon: React.FC<{ shape: ShapeType; size?: number }> = ({ shape, size = 32 }) => {
-  const center = size / 2;
-  const radius = size * 0.35;
-  const halfSize = size * 0.35;
-
-  switch (shape) {
-    case 'circle':
-      return (
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="fill-current">
-          <circle cx={center} cy={center} r={radius} />
-        </svg>
-      );
-    case 'square':
-      return (
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="fill-current">
-          <rect x={center - halfSize} y={center - halfSize} width={halfSize * 2} height={halfSize * 2} />
-        </svg>
-      );
-    case 'triangle':
-      return (
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="fill-current">
-          <polygon
-            points={`${center},${center - halfSize} ${center - halfSize},${center + halfSize} ${center + halfSize},${center + halfSize}`}
-          />
-        </svg>
-      );
-    case 'hexagon':
-      return (
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="fill-current">
-          <polygon
-            points={`${center},${center - halfSize} ${center + halfSize * 0.866},${center - halfSize * 0.5} ${center + halfSize * 0.866},${center + halfSize * 0.5} ${center},${center + halfSize} ${center - halfSize * 0.866},${center + halfSize * 0.5} ${center - halfSize * 0.866},${center - halfSize * 0.5}`}
-          />
-        </svg>
-      );
-    case 'diamond':
-      return (
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="fill-current">
-          <polygon
-            points={`${center},${center - halfSize} ${center + halfSize},${center} ${center},${center + halfSize} ${center - halfSize},${center}`}
-          />
-        </svg>
-      );
-    case 'roundedSquare':
-      return (
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="fill-current">
-          <rect
-            x={center - halfSize}
-            y={center - halfSize}
-            width={halfSize * 2}
-            height={halfSize * 2}
-            rx={halfSize * 0.2}
-          />
-        </svg>
-      );
-    default:
-      return null;
+// Simple preview component that renders a shape preview
+const ShapePreview: React.FC<{ shapeName: ShapeType }> = ({ shapeName }) => {
+  const shapeFn = shapeSets.primitives.shapes[shapeName] || shapeSets.blocks33.shapes[shapeName];
+  
+  if (!shapeFn) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
+        {shapeName}
+      </div>
+    );
   }
+
+  return renderShapePreview(shapeName, shapeFn);
 };
 
 export default function ShapeSelector({ selectedShapes, onSelectionChange }: ShapeSelectorProps) {
@@ -86,52 +61,119 @@ export default function ShapeSelector({ selectedShapes, onSelectionChange }: Sha
     }
   };
 
+  // Get shape names from shapeSets
+  const primitiveShapes: ShapeType[] = Object.keys(shapeSets.primitives.shapes) as ShapeType[];
+  const blockShapes: ShapeType[] = Object.keys(shapeSets.blocks33.shapes) as ShapeType[];
+
   return (
-    <div className="grid grid-cols-3 gap-2">
-      {ALL_SHAPES.map(shape => {
-        const isSelected = selectedShapes.includes(shape);
-        return (
-          <button
-            key={shape}
-            type="button"
-            onClick={() => handleShapeToggle(shape)}
-            className={`
-              relative flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all
-              ${isSelected
-                ? 'border-blue-600 bg-blue-50 text-blue-700'
-                : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
-              }
-              ${selectedShapes.length === 1 && isSelected ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}
-            `}
-            disabled={selectedShapes.length === 1 && isSelected}
-            title={shape.charAt(0).toUpperCase() + shape.slice(1)}
-          >
-            <ShapeIcon shape={shape} size={32} />
-            {isSelected && (
-              <div className="absolute top-1 right-1">
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="text-blue-600"
-                >
-                  <circle cx="8" cy="8" r="8" fill="currentColor" />
-                  <path
-                    d="M5 8L7 10L11 6"
-                    stroke="white"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-            )}
-          </button>
-        );
-      })}
+    <div className="space-y-4">
+      {/* Primitives Section */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">
+          {shapeSets.primitives.meta.name}
+        </h3>
+        <div className="grid grid-cols-4 gap-2">
+          {primitiveShapes.map(shape => {
+            const isSelected = selectedShapes.includes(shape);
+            return (
+              <button
+                key={shape}
+                type="button"
+                onClick={() => handleShapeToggle(shape)}
+                className={`
+                  relative flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all
+                  ${isSelected
+                    ? 'border-blue-600 bg-blue-50 text-blue-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                  }
+                  ${selectedShapes.length === 1 && isSelected ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}
+                `}
+                disabled={selectedShapes.length === 1 && isSelected}
+                title={shape.replace('_', ' ')}
+              >
+                <div className="w-8 h-8 flex items-center justify-center">
+                  <ShapePreview shapeName={shape} />
+                </div>
+                {isSelected && (
+                  <div className="absolute top-1 right-1">
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="text-blue-600"
+                    >
+                      <circle cx="8" cy="8" r="8" fill="currentColor" />
+                      <path
+                        d="M5 8L7 10L11 6"
+                        stroke="white"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3×3 Blocks Section */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">
+          {shapeSets.blocks33.meta.name}
+        </h3>
+        <div className="grid grid-cols-4 gap-2">
+          {blockShapes.map(shape => {
+            const isSelected = selectedShapes.includes(shape);
+            return (
+              <button
+                key={shape}
+                type="button"
+                onClick={() => handleShapeToggle(shape)}
+                className={`
+                  relative flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all
+                  ${isSelected
+                    ? 'border-blue-600 bg-blue-50 text-blue-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                  }
+                  ${selectedShapes.length === 1 && isSelected ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}
+                `}
+                disabled={selectedShapes.length === 1 && isSelected}
+                title={shape.replace('_', ' ')}
+              >
+                <div className="w-8 h-8 flex items-center justify-center">
+                  <ShapePreview shapeName={shape} />
+                </div>
+                {isSelected && (
+                  <div className="absolute top-1 right-1">
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="text-blue-600"
+                    >
+                      <circle cx="8" cy="8" r="8" fill="currentColor" />
+                      <path
+                        d="M5 8L7 10L11 6"
+                        stroke="white"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
-
