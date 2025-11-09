@@ -30,7 +30,13 @@ const renderShapePreview = (shapeName: ShapeType, shapeFunction: Function) => {
 
 // Simple preview component that renders a shape preview
 const ShapePreview: React.FC<{ shapeName: ShapeType }> = ({ shapeName }) => {
-  const shapeFn = shapeSets.primitives.shapes[shapeName] || shapeSets.blocks33.shapes[shapeName];
+  // Check which set contains this shape to avoid TypeScript errors
+  const shapeFn = (shapeName in shapeSets.primitives.shapes 
+    ? shapeSets.primitives.shapes[shapeName as keyof typeof shapeSets.primitives.shapes]
+    : null) || 
+    (shapeName in shapeSets.blocks33.shapes
+      ? shapeSets.blocks33.shapes[shapeName as keyof typeof shapeSets.blocks33.shapes]
+      : null);
   
   if (!shapeFn) {
     return (

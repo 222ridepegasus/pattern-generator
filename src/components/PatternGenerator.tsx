@@ -98,7 +98,7 @@ export default function PatternGenerator() {
   // Undo/Redo system
   const [history, setHistory] = useState<PatternConfig[]>([initialConfig]);
   const [historyIndex, setHistoryIndex] = useState<number>(0);
-  const MAX_HISTORY = 10;
+  const MAX_HISTORY = 20;
   const isUndoRedoRef = useRef(false); // Track if we're doing undo/redo to avoid adding to history
   const prevConfigRef = useRef<PatternConfig>(initialConfig); // Track previous config to detect changes
   const historyIndexRef = useRef<number>(0); // Track history index in ref to avoid dependency issues
