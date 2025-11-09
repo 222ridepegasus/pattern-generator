@@ -17,6 +17,7 @@ export interface PatternConfig {
   gridSize: number;
   borderPadding: number;
   lineSpacing: number;
+  emptySpace: number; // Percentage of empty cells (0-100)
   spacing: number; // Keep for now, might remove later
   backgroundColor: string;
   shapes: ShapeType[];
@@ -29,6 +30,7 @@ export interface PatternConfig {
     horizontal: boolean;
     vertical: boolean;
   };
+  preserveLayout?: boolean; // When true: deterministic flip (preserves layout). When false: random flip (can reorganize)
 }
 
 
@@ -52,6 +54,7 @@ export const DEFAULT_CONFIG: PatternConfig = {
   gridSize: 4,
   borderPadding: 0,
   lineSpacing: 8,
+  emptySpace: 0,
   spacing: 0, // Spacing slider removed - using Line Spacing instead
   backgroundColor: '#ffffff',
   shapes: ['circle_01', 'hexagon_01'],
@@ -63,4 +66,5 @@ export const DEFAULT_CONFIG: PatternConfig = {
     horizontal: false,
     vertical: false,
   },
+  preserveLayout: true,
 };

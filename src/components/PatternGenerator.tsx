@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { DEFAULT_CONFIG } from '../lib/types';
+import React, { useState, useEffect, useRef } from 'react';
+import { DEFAULT_CONFIG, COLOR_PALETTES } from '../lib/types';
 import type { PatternConfig, ShapeType } from '../lib/types';
 import { generatePattern, patternToSVG } from '../lib/patternEngine';
 import { shapeSets } from '../lib/shapeSets.js';
@@ -8,11 +8,83 @@ import ColorPickers from './ColorPickers';
 import PaletteSelector from './PaletteSelector';
 
 /**
+ * Generate a random config for page load
+ */
+function generateRandomConfig(): PatternConfig {
+  // 1. Random background color (#fff or #000)
+  const backgroundColor = Math.random() > 0.5 ? '#ffffff' : '#000000';
+  
+  // 2. Pick shape set (Primitives or 3×3 Blocks)
+  const usePrimitives = Math.random() > 0.5;
+  let shapes: ShapeType[];
+  
+  if (usePrimitives) {
+    // Primitives: pick 2-4 shapes (exclude hexagon_01 as it doesn't tile well)
+    const primitiveShapes: ShapeType[] = Object.keys(shapeSets.primitives.shapes)
+      .filter(shape => shape !== 'hexagon_01') as ShapeType[];
+    const numShapes = Math.floor(Math.random() * 3) + 2; // 2-4
+    const shuffled = [...primitiveShapes].sort(() => Math.random() - 0.5);
+    shapes = shuffled.slice(0, numShapes);
+  } else {
+    // 3×3 Blocks: pick 2-8 shapes
+    const blockShapes: ShapeType[] = Object.keys(shapeSets.blocks33.shapes) as ShapeType[];
+    const numShapes = Math.floor(Math.random() * 7) + 2; // 2-8
+    const shuffled = [...blockShapes].sort(() => Math.random() - 0.5);
+    shapes = shuffled.slice(0, numShapes);
+  }
+  
+  // 3. Pick from one of the preset color palettes
+  const paletteNames = Object.keys(COLOR_PALETTES);
+  const randomPaletteName = paletteNames[Math.floor(Math.random() * paletteNames.length)];
+  const colors = [...COLOR_PALETTES[randomPaletteName as keyof typeof COLOR_PALETTES]];
+  
+  // 4. Randomize mirroring: none, vertical, horizontal, or both
+  const mirrorOptions = [
+    { horizontal: false, vertical: false },
+    { horizontal: false, vertical: true },
+    { horizontal: true, vertical: false },
+    { horizontal: true, vertical: true },
+  ];
+  const mirror = mirrorOptions[Math.floor(Math.random() * mirrorOptions.length)];
+  
+  // 5. Randomize grid size between 3×3 and 8×8
+  const gridSize = Math.floor(Math.random() * 6) + 3; // 3-8
+  
+  // 6. Randomize border padding: 0, 16, 32, or 48
+  const borderPaddingOptions = [0, 16, 32, 48];
+  const borderPadding = borderPaddingOptions[Math.floor(Math.random() * borderPaddingOptions.length)];
+  
+  // 7. Randomize line spacing: 0, 16, 32, 48, or 64
+  const lineSpacingOptions = [0, 16, 32, 48, 64];
+  const lineSpacing = lineSpacingOptions[Math.floor(Math.random() * lineSpacingOptions.length)];
+  
+  return {
+    seed: Date.now(),
+    patternType: 'gridCentered',
+    containerSize: [800, 800],
+    gridSize,
+    borderPadding,
+    lineSpacing,
+    emptySpace: 0, // Always start with no empty space
+    spacing: 0,
+    backgroundColor,
+    shapes,
+    colors,
+    rotation: {
+      enabled: false,
+    },
+    mirror,
+    preserveLayout: true,
+  };
+}
+
+/**
  * Main Pattern Generator Component
  * This is a stub - Cursor will build this out with full functionality
  */
 export default function PatternGenerator() {
-  const [config, setConfig] = useState<PatternConfig>(DEFAULT_CONFIG);
+  const initialConfig = generateRandomConfig();
+  const [config, setConfig] = useState<PatternConfig>(initialConfig);
   const [svgContent, setSvgContent] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isRandomizing, setIsRandomizing] = useState(false);
@@ -22,11 +94,79 @@ export default function PatternGenerator() {
   const [seedCopied, setSeedCopied] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  
+  // Undo/Redo system
+  const [history, setHistory] = useState<PatternConfig[]>([initialConfig]);
+  const [historyIndex, setHistoryIndex] = useState<number>(0);
+  const MAX_HISTORY = 10;
+  const isUndoRedoRef = useRef(false); // Track if we're doing undo/redo to avoid adding to history
+  const prevConfigRef = useRef<PatternConfig>(initialConfig); // Track previous config to detect changes
+  const historyIndexRef = useRef<number>(0); // Track history index in ref to avoid dependency issues
+
+  // Track config changes and add to history (unless it's an undo/redo operation)
+  useEffect(() => {
+    if (isUndoRedoRef.current) {
+      isUndoRedoRef.current = false;
+      prevConfigRef.current = config;
+      historyIndexRef.current = historyIndex;
+      return; // Don't add undo/redo operations to history
+    }
+
+    // Only add to history if config actually changed (not just a re-render)
+    const configChanged = JSON.stringify(prevConfigRef.current) !== JSON.stringify(config);
+    if (!configChanged) {
+      return;
+    }
+
+    prevConfigRef.current = config;
+
+    // Add current config to history
+    setHistory(prev => {
+      const currentIndex = historyIndexRef.current;
+      const newHistory = prev.slice(0, currentIndex + 1); // Remove any "future" history if we're not at the end
+      newHistory.push(JSON.parse(JSON.stringify(config))); // Deep copy
+      
+      // Limit to MAX_HISTORY
+      if (newHistory.length > MAX_HISTORY) {
+        newHistory.shift(); // Remove oldest
+        const newIndex = MAX_HISTORY - 1;
+        historyIndexRef.current = newIndex;
+        setHistoryIndex(newIndex);
+        return newHistory;
+      }
+      
+      const newIndex = newHistory.length - 1;
+      historyIndexRef.current = newIndex;
+      setHistoryIndex(newIndex);
+      return newHistory;
+    });
+  }, [config]);
 
   // Regenerate pattern whenever config changes
   useEffect(() => {
     try {
       setError(null);
+      
+      // Validate config has required properties before generating
+      if (!config.containerSize || !Array.isArray(config.containerSize) || config.containerSize.length < 2) {
+        console.warn('Invalid containerSize, using default [800, 800]');
+        // Use default instead of setting config to avoid infinite loop
+        const defaultContainerSize: [number, number] = [800, 800];
+        const elements = generatePattern({ ...config, containerSize: defaultContainerSize });
+        const svg = patternToSVG(elements, defaultContainerSize, config.backgroundColor || '#ffffff');
+        setSvgContent(svg);
+        return;
+      }
+      
+      if (!config.shapes || !Array.isArray(config.shapes) || config.shapes.length === 0) {
+        console.warn('Invalid shapes, skipping generation');
+        return;
+      }
+      
+      if (!config.colors || !Array.isArray(config.colors) || config.colors.length === 0) {
+        console.warn('Invalid colors, skipping generation');
+        return;
+      }
       
       // Use containerSize directly
       const elements = generatePattern(config);
@@ -217,44 +357,101 @@ export default function PatternGenerator() {
     }));
   };
 
-  // Handle randomize all
+  // Handle randomize all - explicit randomization of all properties
   const handleRandomizeAll = () => {
     setIsRandomizing(true);
     
     // Small delay to show loading state
     setTimeout(() => {
-      const patternTypes: PatternConfig['patternType'][] = ['gridCentered', 'brick'];
-      // Get all available shapes from shapeSets
-      const allShapes: ShapeType[] = [
-        ...Object.keys(shapeSets.primitives.shapes),
-        ...Object.keys(shapeSets.blocks33.shapes)
-      ] as ShapeType[];
-      
-      // Generate random values
-      const newSeed = Date.now();
-      const randomPatternType = patternTypes[Math.floor(Math.random() * patternTypes.length)];
-      const randomColors = generateRandomColors();
-      const randomRotation = Math.random() > 0.5;
-      
-      // Randomly select 2-4 shapes
-      const numShapes = Math.floor(Math.random() * 3) + 2; // 2-4 shapes
-      const shuffledShapes = [...allShapes].sort(() => Math.random() - 0.5);
-      const randomShapes = shuffledShapes.slice(0, numShapes);
-      
-      // Update config with all random values
-      setConfig(prev => ({
-        ...prev,
-        seed: newSeed,
-        patternType: randomPatternType,
-        colors: randomColors,
-        rotation: {
-          enabled: randomRotation,
-        },
-        shapes: randomShapes,
-      }));
-      
-      setSeedInput('');
-      setIsRandomizing(false);
+      try {
+        // 1. Get all available shapes from any set (1-9 shapes)
+        const allShapes: ShapeType[] = [
+          ...Object.keys(shapeSets.primitives.shapes),
+          ...Object.keys(shapeSets.blocks33.shapes)
+        ] as ShapeType[];
+        
+        // Randomly select 1-9 shapes
+        const numShapes = Math.floor(Math.random() * 9) + 1; // 1-9 shapes
+        const shuffledShapes = [...allShapes].sort(() => Math.random() - 0.5);
+        const randomShapes = shuffledShapes.slice(0, numShapes);
+        
+        // 2. Pick a random color theme from palettes
+        const paletteNames = Object.keys(COLOR_PALETTES);
+        const randomPaletteName = paletteNames[Math.floor(Math.random() * paletteNames.length)];
+        const randomColors = [...COLOR_PALETTES[randomPaletteName as keyof typeof COLOR_PALETTES]];
+        
+        // 3. Randomize background color: either #fff or #000
+        const randomBackgroundColor = Math.random() > 0.5 ? '#ffffff' : '#000000';
+        
+        // 4. Randomize rotation: on or off
+        const randomRotation = Math.random() > 0.5;
+        
+        // 5. Randomize mirror variables
+        const mirrorOptions = [
+          { horizontal: false, vertical: false },
+          { horizontal: false, vertical: true },
+          { horizontal: true, vertical: false },
+          { horizontal: true, vertical: true },
+        ];
+        const randomMirror = mirrorOptions[Math.floor(Math.random() * mirrorOptions.length)];
+        
+        // 6. Randomize line spacing: 0, 16, 32, 48, or 64
+        const lineSpacingOptions = [0, 16, 32, 48, 64];
+        const randomLineSpacing = lineSpacingOptions[Math.floor(Math.random() * lineSpacingOptions.length)];
+        
+        // 7. Randomize border padding: 0, 16, 32, or 48
+        const borderPaddingOptions = [0, 16, 32, 48];
+        const randomBorderPadding = borderPaddingOptions[Math.floor(Math.random() * borderPaddingOptions.length)];
+        
+        // 8. Randomize grid size: 3-8
+        const randomGridSize = Math.floor(Math.random() * 6) + 3; // 3-8
+        
+        // 9. Randomize empty space: 0-100%
+        const randomEmptySpace = Math.floor(Math.random() * 101); // 0-100
+        
+        // 10. New seed
+        const newSeed = Date.now();
+        
+        // Build complete config object with all required properties
+        const newConfig: PatternConfig = {
+          seed: newSeed,
+          patternType: 'gridCentered', // Always use gridCentered for now
+          containerSize: [800, 800], // Always 800x800
+          gridSize: randomGridSize,
+          borderPadding: randomBorderPadding,
+          lineSpacing: randomLineSpacing,
+          emptySpace: randomEmptySpace,
+          spacing: 0, // Keep at 0
+          backgroundColor: randomBackgroundColor,
+          shapes: randomShapes,
+          colors: randomColors,
+          rotation: {
+            enabled: randomRotation,
+          },
+          mirror: randomMirror,
+          preserveLayout: true, // Default to preserving layout
+        };
+        
+        // Validate before setting
+        if (!newConfig.containerSize || !Array.isArray(newConfig.containerSize) || newConfig.containerSize.length < 2) {
+          throw new Error('Invalid containerSize');
+        }
+        if (!newConfig.shapes || !Array.isArray(newConfig.shapes) || newConfig.shapes.length === 0) {
+          throw new Error('Invalid shapes array');
+        }
+        if (!newConfig.colors || !Array.isArray(newConfig.colors) || newConfig.colors.length === 0) {
+          throw new Error('Invalid colors array');
+        }
+        
+        // Set the complete config
+        setConfig(newConfig);
+        setSeedInput('');
+        setIsRandomizing(false);
+      } catch (err) {
+        console.error('Error in handleRandomizeAll:', err);
+        setIsRandomizing(false);
+        setError(err instanceof Error ? err.message : 'Failed to randomize');
+      }
     }, 150); // Brief delay for visual feedback
   };
 
@@ -266,6 +463,30 @@ export default function PatternGenerator() {
       setTimeout(() => setSeedCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy seed:', err);
+    }
+  };
+
+  // Handle undo
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      isUndoRedoRef.current = true;
+      const newIndex = historyIndex - 1;
+      const prevConfig = history[newIndex];
+      setConfig(JSON.parse(JSON.stringify(prevConfig))); // Deep copy
+      setHistoryIndex(newIndex);
+      historyIndexRef.current = newIndex;
+    }
+  };
+
+  // Handle redo
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      isUndoRedoRef.current = true;
+      const newIndex = historyIndex + 1;
+      const nextConfig = history[newIndex];
+      setConfig(JSON.parse(JSON.stringify(nextConfig))); // Deep copy
+      setHistoryIndex(newIndex);
+      historyIndexRef.current = newIndex;
     }
   };
 
@@ -332,6 +553,38 @@ export default function PatternGenerator() {
 
   return (
     <div className="min-h-screen bg-gray-100">
+      {/* Undo/Redo Buttons - Debug */}
+      <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 flex gap-2">
+        <button
+          type="button"
+          onClick={handleUndo}
+          disabled={historyIndex <= 0}
+          className={`
+            px-3 py-1.5 text-sm font-medium rounded
+            ${historyIndex <= 0
+              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              : 'bg-gray-600 text-white hover:bg-gray-700'
+            }
+          `}
+        >
+          Undo
+        </button>
+        <button
+          type="button"
+          onClick={handleRedo}
+          disabled={historyIndex >= history.length - 1}
+          className={`
+            px-3 py-1.5 text-sm font-medium rounded
+            ${historyIndex >= history.length - 1
+              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              : 'bg-gray-600 text-white hover:bg-gray-700'
+            }
+          `}
+        >
+          Redo
+        </button>
+      </div>
+      
       {/* Mobile Menu Button */}
       <button
         type="button"
@@ -464,6 +717,26 @@ export default function PatternGenerator() {
                     }}
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Empty Space: {config.emptySpace}%
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="10"
+                    value={config.emptySpace}
+                    onChange={(e) => setConfig(prev => ({ 
+                      ...prev, 
+                      emptySpace: parseInt(e.target.value) 
+                    }))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
+                    style={{
+                      background: `linear-gradient(to right, #2563eb 0%, #2563eb ${config.emptySpace}%, #e5e7eb ${config.emptySpace}%, #e5e7eb 100%)`
+                    }}
+                  />
+                </div>
                 {/* Spacing slider removed - using Line Spacing instead */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -520,6 +793,27 @@ export default function PatternGenerator() {
                     className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
                   />
                   <span className="text-sm font-medium text-gray-700">Mirror Vertically</span>
+                </label>
+              </div>
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.preserveLayout !== false}
+                    onChange={(e) => setConfig(prev => ({
+                      ...prev,
+                      preserveLayout: e.target.checked
+                    }))}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                  />
+                  <div className="flex-1">
+                    <span className="text-sm font-medium text-gray-700">Preserve Layout</span>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {config.preserveLayout !== false 
+                        ? 'Layout stays fixed, only shapes flip' 
+                        : 'Layout can reorganize'}
+                    </p>
+                  </div>
                 </label>
               </div>
             </div>
