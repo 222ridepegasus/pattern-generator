@@ -9,8 +9,8 @@ interface ShapeSelectorProps {
 
 // Render shape preview as mini SVG
 const renderShapePreview = (shapeName: ShapeType, shapeFunction: Function) => {
-  // Generate shape at center of 64x64 canvas
-  const shapeData = shapeFunction(32, 32, 48);
+  // Generate shape at center of 64x64 canvas, size 32px
+  const shapeData = shapeFunction(32, 32, 32);
   
   // Convert to SVG element
   const attrs = Object.entries(shapeData.attrs)
@@ -29,14 +29,12 @@ const renderShapePreview = (shapeName: ShapeType, shapeFunction: Function) => {
 };
 
 // Simple preview component that renders a shape preview
+// NOTE: Primitives and blocks are disabled, only nautical shapes are used
 const ShapePreview: React.FC<{ shapeName: ShapeType }> = ({ shapeName }) => {
-  // Check which set contains this shape to avoid TypeScript errors
-  const shapeFn = (shapeName in shapeSets.primitives.shapes 
-    ? shapeSets.primitives.shapes[shapeName as keyof typeof shapeSets.primitives.shapes]
-    : null) || 
-    (shapeName in shapeSets.blocks33.shapes
-      ? shapeSets.blocks33.shapes[shapeName as keyof typeof shapeSets.blocks33.shapes]
-      : null);
+  // Only nautical shapes are enabled now
+  const shapeFn = shapeName in shapeSets.nautical.shapes
+    ? shapeSets.nautical.shapes[shapeName as keyof typeof shapeSets.nautical.shapes]
+    : null;
   
   if (!shapeFn) {
     return (
@@ -49,7 +47,65 @@ const ShapePreview: React.FC<{ shapeName: ShapeType }> = ({ shapeName }) => {
   return renderShapePreview(shapeName, shapeFn);
 };
 
+// Nautical icon component that loads SVG and swaps colors when selected
+const NauticalIcon: React.FC<{ shapeKey: string; isSelected: boolean }> = ({ shapeKey, isSelected }) => {
+  const [svgContent, setSvgContent] = React.useState<string>('');
+  const [error, setError] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch(`/shapes/nautical/${shapeKey}.svg`)
+      .then(res => res.text())
+      .then(content => {
+        let processed = content;
+        
+        if (isSelected) {
+          // Replace gray colors with blue colors
+          processed = processed
+            .replace(/#000000/gi, '#2A4DD0')
+            .replace(/#3A3A3A/gi, '#5A75DB')
+            .replace(/#777777/gi, '#8DA0E6')
+            .replace(/#AAAAAA/gi, '#B8C4EF')
+            .replace(/#999999/gi, '#B8C4EF') // Just in case
+            // Also handle fill="black" and style attributes
+            .replace(/fill="black"/gi, 'fill="#2A4DD0"')
+            .replace(/fill='black'/gi, "fill='#2A4DD0'")
+            .replace(/style="fill:black/gi, 'style="fill:#2A4DD0')
+            .replace(/style='fill:black/gi, "style='fill:#2A4DD0");
+        }
+        
+        setSvgContent(processed);
+      })
+      .catch(() => setError(true));
+  }, [shapeKey, isSelected]);
+
+  if (error) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
+        {shapeKey.replace('nautical_', '').replace('_01', '').toUpperCase()}
+      </div>
+    );
+  }
+
+  if (!svgContent) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="w-3 h-3 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      className="w-full h-full flex items-center justify-center"
+      dangerouslySetInnerHTML={{ __html: svgContent }} 
+    />
+  );
+};
+
+
 export default function ShapeSelector({ selectedShapes, onSelectionChange }: ShapeSelectorProps) {
+  const MAX_SELECTED_SHAPES = 26;
+  
   const handleShapeToggle = (shape: ShapeType) => {
     const isSelected = selectedShapes.includes(shape);
     
@@ -62,119 +118,54 @@ export default function ShapeSelector({ selectedShapes, onSelectionChange }: Sha
       // Remove shape from selection
       onSelectionChange(selectedShapes.filter(s => s !== shape));
     } else {
-      // Add shape to selection
-      onSelectionChange([...selectedShapes, shape]);
+      // Add shape to selection, but only if under the limit
+      if (selectedShapes.length < MAX_SELECTED_SHAPES) {
+        onSelectionChange([...selectedShapes, shape]);
+      }
     }
   };
 
-  // Get shape names from shapeSets
-  const primitiveShapes: ShapeType[] = Object.keys(shapeSets.primitives.shapes) as ShapeType[];
-  const blockShapes: ShapeType[] = Object.keys(shapeSets.blocks33.shapes) as ShapeType[];
+  // Get shape names from shapeSets (only enabled sets)
+  const nauticalShapes: ShapeType[] = Object.keys(shapeSets.nautical.shapes) as ShapeType[];
 
   return (
     <div className="space-y-4">
-      {/* Primitives Section */}
-      <div>
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">
-          {shapeSets.primitives.meta.name}
-        </h3>
-        <div className="grid grid-cols-4 gap-2">
-          {primitiveShapes.map(shape => {
-            const isSelected = selectedShapes.includes(shape);
-            return (
-              <button
-                key={shape}
-                type="button"
-                onClick={() => handleShapeToggle(shape)}
-                className={`
-                  relative flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all
-                  ${isSelected
-                    ? 'border-blue-600 bg-blue-50 text-blue-700'
-                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
-                  }
-                  ${selectedShapes.length === 1 && isSelected ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}
-                `}
-                disabled={selectedShapes.length === 1 && isSelected}
-                title={shape.replace('_', ' ')}
-              >
-                <div className="w-8 h-8 flex items-center justify-center">
-                  <ShapePreview shapeName={shape} />
-                </div>
-                {isSelected && (
-                  <div className="absolute top-1 right-1">
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="text-blue-600"
-                    >
-                      <circle cx="8" cy="8" r="8" fill="currentColor" />
-                      <path
-                        d="M5 8L7 10L11 6"
-                        stroke="white"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
+      {/* Selection Counter */}
+      <div className="text-xs text-gray-500 mb-2">
+        {selectedShapes.length} / {MAX_SELECTED_SHAPES} shapes selected
       </div>
-
-      {/* 3×3 Blocks Section */}
+      
+      {/* Nautical Flags Section */}
       <div>
         <h3 className="text-sm font-semibold text-gray-700 mb-2">
-          {shapeSets.blocks33.meta.name}
+          {shapeSets.nautical.meta.name}
         </h3>
-        <div className="grid grid-cols-4 gap-2">
-          {blockShapes.map(shape => {
+        <div className="grid grid-cols-6 gap-2">
+          {nauticalShapes.map(shape => {
             const isSelected = selectedShapes.includes(shape);
+            const isAtLimit = !isSelected && selectedShapes.length >= MAX_SELECTED_SHAPES;
+            const isDisabled = (selectedShapes.length === 1 && isSelected) || isAtLimit;
             return (
               <button
                 key={shape}
                 type="button"
                 onClick={() => handleShapeToggle(shape)}
                 className={`
-                  relative flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all
+                  relative flex flex-col items-center justify-center w-9 h-9 rounded-lg border-2 transition-all
                   ${isSelected
                     ? 'border-blue-600 bg-blue-50 text-blue-700'
+                    : isAtLimit
+                    ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-50'
                     : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
                   }
-                  ${selectedShapes.length === 1 && isSelected ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}
+                  ${isDisabled ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}
                 `}
-                disabled={selectedShapes.length === 1 && isSelected}
-                title={shape.replace('_', ' ')}
+                disabled={isDisabled}
+                title={isAtLimit ? `Maximum ${MAX_SELECTED_SHAPES} shapes selected` : shape.replace('_', ' ')}
               >
-                <div className="w-8 h-8 flex items-center justify-center">
-                  <ShapePreview shapeName={shape} />
+                <div className="w-4 h-4 flex items-center justify-center">
+                  <NauticalIcon shapeKey={shape} isSelected={isSelected} />
                 </div>
-                {isSelected && (
-                  <div className="absolute top-1 right-1">
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="text-blue-600"
-                    >
-                      <circle cx="8" cy="8" r="8" fill="currentColor" />
-                      <path
-                        d="M5 8L7 10L11 6"
-                        stroke="white"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-                )}
               </button>
             );
           })}

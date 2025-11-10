@@ -113,93 +113,156 @@ export function generateCenteredGrid(config, rng) {
       const y = offsetY + (row * (tileSize + lineSpacing)) + (tileSize / 2);
 
       const shapeType = rng.choice(selectedShapes);
-      const color = rng.choice(colors);
 
-      // Flip per cell - either deterministic (preserves layout) or random (can reorganize)
-      const preserveLayout = config.preserveLayout !== false; // Default to true
+      // Check if this is a multi-slot shape (nautical flags)
+      const isMultiSlotShape = shapeType.startsWith('nautical_');
+
+      // Flip per cell - only for single-color shapes
       let flipH = 1;
       let flipV = 1;
+      
+      if (!isMultiSlotShape) {
+        const preserveLayout = config.preserveLayout !== false; // Default to true
 
-      if (config.mirror?.horizontal) {
-        if (preserveLayout) {
-          // Deterministic flip decision based on cell position and seed
-          // This ensures same cell always has same flip state, preserving layout when mirroring is toggled
-          const shouldFlipH = ((config.seed + row * gridSize + col) % 2 === 0);
-          flipH = shouldFlipH ? -1 : 1;
-        } else {
-          // Random flip - can reorganize layout
-          flipH = rng.next() > 0.5 ? -1 : 1;
-        }
-      }
-
-      if (config.mirror?.vertical) {
-        if (preserveLayout) {
-          // Use different offset (+1) to get different pattern for vertical flips
-          const shouldFlipV = ((config.seed + row * gridSize + col + 1) % 2 === 0);
-          flipV = shouldFlipV ? -1 : 1;
-        } else {
-          // Random flip - can reorganize layout
-          flipV = rng.next() > 0.5 ? -1 : 1;
-        }
-      }
-
-      // Generate shape with flip parameters
-      const element = shapes[shapeType](x, y, tileSize, flipH, flipV);
-      element.fill = color;
-
-      // Add rotation if enabled - handle both shapes with and without existing transforms
-      if (rotation.enabled) {
-        const rotationAngle = rng.range(0, 360);
-        
-        // Check if shape already has a transform in attrs (path-based shapes)
-        if (element.attrs && element.attrs.transform) {
-          // For shapes with transforms, we need to rotate around the center point (x, y)
-          // Existing transform: translate(x, y) scale(...) translate(-32, -32)
-          // To rotate around center: translate(x, y) rotate(angle) scale(...) translate(-32, -32)
-          // SVG applies transforms right-to-left, so execution order is:
-          // 1. translate(-32, -32) - centers shape at origin
-          // 2. scale(...) - scales around origin
-          // 3. rotate(angle) - rotates around origin (which is at x,y in final coords)
-          // 4. translate(x, y) - positions at final location
-          const existingTransform = element.attrs.transform;
-          // Extract components
-          const scaleMatch = existingTransform.match(/scale\([^)]+\)/);
-          const finalTranslateMatch = existingTransform.match(/translate\(-32, -32\)/);
-          
-          if (scaleMatch && finalTranslateMatch) {
-            // To rotate around the shape's center (x, y):
-            // Transform: translate(x, y) rotate(angle) scale(...) translate(-32, -32)
-            // SVG applies right-to-left:
-            //   1. translate(-32, -32) - centers shape
-            //   2. scale(...) - scales
-            //   3. rotate(angle) - rotates around origin (which becomes x,y after translate(x,y))
-            //   4. translate(x, y) - positions at final location
-            // Using rotate(angle) without center point rotates around (0,0) in current coord system
-            // After translate(x,y), that (0,0) is at (x,y) in final coords - perfect!
-            element.transform = `translate(${x}, ${y}) rotate(${rotationAngle}) ${scaleMatch[0]} ${finalTranslateMatch[0]}`;
+        if (config.mirror?.horizontal) {
+          if (preserveLayout) {
+            // Deterministic flip decision based on cell position and seed
+            // This ensures same cell always has same flip state, preserving layout when mirroring is toggled
+            const shouldFlipH = ((config.seed + row * gridSize + col) % 2 === 0);
+            flipH = shouldFlipH ? -1 : 1;
           } else {
-            // Fallback: append rotation with center point - this may cause offset
-            // Try to extract x, y from the first translate if possible
-            const firstTranslateMatch = existingTransform.match(/translate\(([^,]+),\s*([^)]+)\)/);
-            if (firstTranslateMatch) {
-              const tx = parseFloat(firstTranslateMatch[1]);
-              const ty = parseFloat(firstTranslateMatch[2]);
-              // Use the extracted x, y for rotation center
-              element.transform = `${existingTransform} rotate(${rotationAngle} ${tx} ${ty})`;
+            // Random flip - can reorganize layout
+            flipH = rng.next() > 0.5 ? -1 : 1;
+          }
+        }
+
+        if (config.mirror?.vertical) {
+          if (preserveLayout) {
+            // Use different offset (+1) to get different pattern for vertical flips
+            const shouldFlipV = ((config.seed + row * gridSize + col + 1) % 2 === 0);
+            flipV = shouldFlipV ? -1 : 1;
+          } else {
+            // Random flip - can reorganize layout
+            flipV = rng.next() > 0.5 ? -1 : 1;
+          }
+        }
+      }
+
+      // Generate shape - don't pass flip params for multi-slot shapes
+      const shapeResult = isMultiSlotShape 
+        ? shapes[shapeType](x, y, tileSize)
+        : shapes[shapeType](x, y, tileSize, flipH, flipV);
+
+      // For single-color shapes, pick random color
+      // For multi-slot shapes, colors are assigned per-slot (no random pick needed)
+      const isMultiSlot = Array.isArray(shapeResult);
+      const color = isMultiSlot ? null : rng.choice(colors);
+
+      // Handle multi-slot shapes (arrays of paths)
+      if (Array.isArray(shapeResult)) {
+        // Multi-slot shape (like nautical flags)
+        // NOTE: Transforms disabled for multi-slot shapes for now
+        shapeResult.forEach(pathElement => {
+          const slotNumber = pathElement.slot;
+          const colorIndex = slotNumber - 1;
+          
+          let slotColor;
+          
+          if (colorIndex < colors.length) {
+            slotColor = colors[colorIndex];
+          } else {
+            // Fallback for 3-color themes
+            if (colors.length === 3) {
+              slotColor = colors[(colorIndex - 3) % 2 + 1];
             } else {
-              // Last resort: use provided x, y
-              element.transform = `${existingTransform} rotate(${rotationAngle} ${x} ${y})`;
+              slotColor = colors[colors.length - 1];
             }
           }
-          // Remove transform from attrs to avoid duplication in SVG output
-          delete element.attrs.transform;
-        } else {
-          // No existing transform (circles, squares) - rotate around center point
-          element.transform = `rotate(${rotationAngle} ${x} ${y})`;
+          
+          // Create element with slot color - NO transforms applied
+          const element = {
+            type: pathElement.type,
+            attrs: pathElement.attrs,
+            fill: slotColor
+          };
+          
+          elements.push(element);
+        });
+      } else {
+        // Single-color shape - use the random color we picked
+        shapeResult.fill = color;
+        
+        if (rotation.enabled) {
+          const rotationAngle = rng.range(0, 360);
+          
+          // Check if shape already has a transform in attrs (path-based shapes)
+          if (shapeResult.attrs && shapeResult.attrs.transform) {
+            // For shapes with transforms, we need to rotate around the center point (x, y)
+            // Existing transform: translate(x, y) scale(...) translate(-32, -32)
+            // To rotate around center: translate(x, y) rotate(angle) scale(...) translate(-32, -32)
+            // SVG applies transforms right-to-left, so execution order is:
+            // 1. translate(-32, -32) - centers shape at origin
+            // 2. scale(...) - scales around origin
+            // 3. rotate(angle) - rotates around origin (which is at x,y in final coords)
+            // 4. translate(x, y) - positions at final location
+            const existingTransform = shapeResult.attrs.transform;
+            // Extract components
+            const scaleMatch = existingTransform.match(/scale\([^)]+\)/);
+            const finalTranslateMatch = existingTransform.match(/translate\(-32, -32\)/);
+            
+            if (scaleMatch && finalTranslateMatch) {
+              // To rotate around the shape's center (x, y):
+              // Transform: translate(x, y) rotate(angle) scale(...) translate(-32, -32)
+              // SVG applies right-to-left:
+              //   1. translate(-32, -32) - centers shape
+              //   2. scale(...) - scales
+              //   3. rotate(angle) - rotates around origin (which becomes x,y after translate(x,y))
+              //   4. translate(x, y) - positions at final location
+              // Using rotate(angle) without center point rotates around (0,0) in current coord system
+              // After translate(x,y), that (0,0) is at (x,y) in final coords - perfect!
+              shapeResult.transform = `translate(${x}, ${y}) rotate(${rotationAngle}) ${scaleMatch[0]} ${finalTranslateMatch[0]}`;
+            } else {
+              // Fallback: append rotation with center point - this may cause offset
+              // Try to extract x, y from the first translate if possible
+              const firstTranslateMatch = existingTransform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+              if (firstTranslateMatch) {
+                const tx = parseFloat(firstTranslateMatch[1]);
+                const ty = parseFloat(firstTranslateMatch[2]);
+                // Use the extracted x, y for rotation center
+                shapeResult.transform = `${existingTransform} rotate(${rotationAngle} ${tx} ${ty})`;
+              } else {
+                // Last resort: use provided x, y
+                shapeResult.transform = `${existingTransform} rotate(${rotationAngle} ${x} ${y})`;
+              }
+            }
+            // Remove transform from attrs to avoid duplication in SVG output
+            delete shapeResult.attrs.transform;
+          } else {
+            // No existing transform (circles, squares) - rotate around center point
+            shapeResult.transform = `rotate(${rotationAngle} ${x} ${y})`;
+          }
         }
+        
+        elements.push(shapeResult);
       }
 
-      elements.push(element);
+      // Add border frame on top of all shapes for this tile (inset to render inside only)
+      if (config.stroke?.enabled) {
+        const strokeWidth = config.stroke.width;
+        const inset = strokeWidth / 2; // Inset by half stroke width to keep border inside
+        elements.push({
+          type: 'rect',
+          attrs: {
+            x: x - tileSize / 2 + inset,
+            y: y - tileSize / 2 + inset,
+            width: tileSize - strokeWidth,
+            height: tileSize - strokeWidth,
+            fill: 'none',
+            stroke: config.stroke.color,
+            'stroke-width': config.stroke.width
+          }
+        });
+      }
     }
   }
 

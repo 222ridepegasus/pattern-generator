@@ -1,0 +1,13 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g clip-path="url(#clip0_2009_2826)">
+<rect id="slot_1" width="64" height="64" fill="#FFFFFF"/>
+<rect width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
+<path d="M32 64H0V32H32V64ZM64 32H32V0H64V32Z" fill="#AAAAAA" style="fill:#AAAAAA;fill:color(display-p3 0.6667 0.6667 0.6667);fill-opacity:1;"/>
+<path d="M64 64H32V32H64V64ZM32 32H0V0H32V32Z" fill="#777777" style="fill:#777777;fill:color(display-p3 0.4667 0.4667 0.4667);fill-opacity:1;"/>
+</g>
+<defs>
+<clipPath id="clip0_2009_2826">
+<rect width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
+</clipPath>
+</defs>
+</svg>

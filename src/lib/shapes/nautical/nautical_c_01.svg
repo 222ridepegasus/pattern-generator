@@ -1,0 +1,13 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="shapes/nautical/nautical_c_01" clip-path="url(#clip0_2009_2817)">
+<rect id="slot_1" width="64" height="64" fill="#FFFFFF"/>
+<rect width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
+<path id="slot_2" d="M64 64H0V51H64V64ZM64 13H0V0H64V13Z" fill="black" style="fill:black;fill-opacity:1;"/>
+<rect id="slot_3" y="25.5" width="64" height="13" fill="#3A3A3A" style="fill:#3A3A3A;fill:color(display-p3 0.2275 0.2275 0.2275);fill-opacity:1;"/>
+</g>
+<defs>
+<clipPath id="clip0_2009_2817">
+<rect width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
+</clipPath>
+</defs>
+</svg>
