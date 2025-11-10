@@ -89,6 +89,36 @@ export const SLOT_BASED_THEMES = [
       '#D65C64'   // slot_3 - Pink
       // Note: Only 3 colors, fallback logic will handle slots 4 & 5
     ]
+  },
+  {
+    name: 'CGA Mist',
+    colors: [
+      '#CC5AA3',  // slot_1 - Background
+      '#81C2D4'   // slot_2 - Sky Blue
+    ]
+  },
+  {
+    name: 'Iron Solstice',
+    colors: [
+      '#000000',  // slot_1 - Background
+      '#C87340'   // slot_2 - Copper
+    ]
+  },
+  {
+    name: 'Schattenacker',
+    colors: [
+      '#504E27',  // slot_1 - Background
+      '#BA9A53'   // slot_2 - Gold
+    ]
+  },
+  {
+    name: 'Flamingo Fatigue',
+    colors: [
+      '#B7ACB4',  // slot_1 - Background
+      '#532933',  // slot_2 - Dark Red
+      '#CD647E',  // slot_3 - Pink
+      '#BBA34A'   // slot_4 - Mustard
+    ]
   }
 ];
 
@@ -98,6 +128,10 @@ export const COLOR_PALETTES = {
   'Nautical Modern': SLOT_BASED_THEMES[0].colors,
   'Nautical': SLOT_BASED_THEMES[1].colors,
   'Neon Cinder': SLOT_BASED_THEMES[2].colors,
+  'CGA Mist': SLOT_BASED_THEMES[3].colors,
+  'Iron Solstice': SLOT_BASED_THEMES[4].colors,
+  'Schattenacker': SLOT_BASED_THEMES[5].colors,
+  'Flamingo Fatigue': SLOT_BASED_THEMES[6].colors,
 };
 
 export const DEFAULT_CONFIG: PatternConfig = {

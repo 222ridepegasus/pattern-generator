@@ -1,11 +1,11 @@
 <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g clip-path="url(#clip0_2009_2836)">
-<rect id="slot_1" width="64" height="64" fill="#FFFFFF"/>
+<g id="shapes/nautical/nautical_v_01" clip-path="url(#clip0_2012_1916)">
 <rect width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
-<path d="M68.2422 4.24219L40.4844 32L68.2422 59.7578L59.7578 68.2422L32 40.4844L4.24219 68.2422L-4.24219 59.7578L23.5156 32L-4.24219 4.24219L4.24219 -4.24219L32 23.5156L59.7578 -4.24219L68.2422 4.24219Z" fill="#3A3A3A" style="fill:#3A3A3A;fill:color(display-p3 0.2275 0.2275 0.2275);fill-opacity:1;"/>
+<rect id="slot_1" width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
+<path id="slot_3" d="M31.4912 24.0234L55.5156 0H64V8.48438L40.1104 32.373L64 55.5156V64H55.5156L32 40.4844L8.48438 64H0V55.5156L23.5156 32L0 8.48438V0H6.69141L31.4912 24.0234Z" fill="#3A3A3A" style="fill:#3A3A3A;fill:color(display-p3 0.2275 0.2275 0.2275);fill-opacity:1;"/>
 </g>
 <defs>
-<clipPath id="clip0_2009_2836">
+<clipPath id="clip0_2012_1916">
 <rect width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
 </clipPath>
 </defs>
