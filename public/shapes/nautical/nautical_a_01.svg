@@ -1,11 +1,10 @@
 <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g id="shapes/nautical/nautical_a_01" clip-path="url(#clip0_2012_1895)">
-<rect width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
+<g id="shapes/nautical/nautical_a_01" clip-path="url(#clip0_2013_4396)">
 <rect id="slot_1" width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
 <path id="slot_2" d="M32 0V64H64L46 32L64 0H32Z" fill="black" style="fill:black;fill-opacity:1;"/>
 </g>
 <defs>
-<clipPath id="clip0_2012_1895">
+<clipPath id="clip0_2013_4396">
 <rect width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
 </clipPath>
 </defs>

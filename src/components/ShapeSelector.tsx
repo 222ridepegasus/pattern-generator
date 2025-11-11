@@ -1,10 +1,12 @@
 import React from 'react';
 import type { ShapeType } from '../lib/types';
-import { shapeSets } from '../lib/shapeSets.js';
+import { availableShapes } from '../lib/shapeLoader.js';
 
 interface ShapeSelectorProps {
   selectedShapes: ShapeType[];
   onSelectionChange: (shapes: ShapeType[]) => void;
+  shapesInPattern?: Set<ShapeType>; // Shapes currently in the pattern
+  onClearGrid?: () => void; // Callback to clear the grid
 }
 
 // Render shape preview as mini SVG
@@ -103,7 +105,7 @@ const NauticalIcon: React.FC<{ shapeKey: string; isSelected: boolean }> = ({ sha
 };
 
 
-export default function ShapeSelector({ selectedShapes, onSelectionChange }: ShapeSelectorProps) {
+export default function ShapeSelector({ selectedShapes, onSelectionChange, shapesInPattern = new Set(), onClearGrid }: ShapeSelectorProps) {
   const MAX_SELECTED_SHAPES = 26;
   
   const handleShapeToggle = (shape: ShapeType) => {
@@ -125,45 +127,133 @@ export default function ShapeSelector({ selectedShapes, onSelectionChange }: Sha
     }
   };
 
-  // Get shape names from shapeSets (only enabled sets)
-  const nauticalShapes: ShapeType[] = Object.keys(shapeSets.nautical.shapes) as ShapeType[];
+  // Get shape names from availableShapes
+  const nauticalShapes: ShapeType[] = availableShapes.nautical as ShapeType[];
+  
+  const allSelected = selectedShapes.length === nauticalShapes.length;
+  const handleSelectAll = () => {
+    // Select all shapes
+    onSelectionChange([...nauticalShapes]);
+  };
+
+  const handleSelectSingle = () => {
+    // Randomly select a single shape
+    const randomIndex = Math.floor(Math.random() * nauticalShapes.length);
+    onSelectionChange([nauticalShapes[randomIndex]]);
+  };
+
+  const handleSelectRandom = () => {
+    // Pick a random number between 2 and 12
+    const randomCount = Math.floor(Math.random() * 11) + 2; // 2-12 inclusive
+    
+    // Shuffle the shapes array and pick the first randomCount
+    const shuffled = [...nauticalShapes].sort(() => Math.random() - 0.5);
+    const randomShapes = shuffled.slice(0, randomCount);
+    
+    onSelectionChange(randomShapes);
+  };
 
   return (
     <div className="space-y-4">
-      {/* Selection Counter */}
-      <div className="text-xs text-gray-500 mb-2">
-        {selectedShapes.length} / {MAX_SELECTED_SHAPES} shapes selected
+      {/* Select All / Deselect Toggle with Counter */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSelectAll}
+            className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+          >
+            All
+          </button>
+          <button
+            type="button"
+            onClick={handleSelectSingle}
+            className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+          >
+            Single
+          </button>
+          <button
+            type="button"
+            onClick={handleSelectRandom}
+            className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+          >
+            Random
+          </button>
+          {onClearGrid && (
+            <button
+              type="button"
+              onClick={onClearGrid}
+              className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <span className="text-xs text-gray-500">
+          {selectedShapes.length}/{MAX_SELECTED_SHAPES}
+        </span>
       </div>
       
       {/* Nautical Flags Section */}
       <div>
         <h3 className="text-sm font-semibold text-gray-700 mb-2">
-          {shapeSets.nautical.meta.name}
+          Nautical Flags
         </h3>
-        <div className="grid grid-cols-6 gap-2">
+        <div className="grid grid-cols-4 gap-3">
           {nauticalShapes.map(shape => {
             const isSelected = selectedShapes.includes(shape);
+            const isInPattern = shapesInPattern.has(shape);
             const isAtLimit = !isSelected && selectedShapes.length >= MAX_SELECTED_SHAPES;
             const isDisabled = (selectedShapes.length === 1 && isSelected) || isAtLimit;
+            
+            // Determine border style based on state
+            let borderClass = '';
+            let bgClass = '';
+            
+            if (isSelected && isInPattern) {
+              // Selected AND in pattern: solid blue border
+              borderClass = 'border-blue-600';
+              bgClass = 'bg-blue-50 text-blue-700';
+            } else if (isSelected && !isInPattern) {
+              // Selected but NOT in pattern: dotted blue border
+              borderClass = 'border-blue-600 border-dashed';
+              bgClass = 'bg-blue-50/50 text-blue-600 opacity-50';
+            } else if (isInPattern && !isSelected) {
+              // In pattern but not selected: green border
+              borderClass = 'border-green-500';
+              bgClass = 'bg-green-50';
+            } else if (isAtLimit) {
+              // At limit: gray disabled
+              borderClass = 'border-gray-200';
+              bgClass = 'bg-gray-50 text-gray-400 cursor-not-allowed opacity-50';
+            } else {
+              // Default: normal gray border
+              borderClass = 'border-gray-200';
+              bgClass = 'bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50';
+            }
+            
             return (
               <button
                 key={shape}
                 type="button"
+                draggable={true}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/plain', shape);
+                  e.dataTransfer.effectAllowed = 'copy';
+                }}
                 onClick={() => handleShapeToggle(shape)}
                 className={`
-                  relative flex flex-col items-center justify-center w-9 h-9 rounded-lg border-2 transition-all
-                  ${isSelected
-                    ? 'border-blue-600 bg-blue-50 text-blue-700'
-                    : isAtLimit
-                    ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed opacity-50'
-                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
-                  }
-                  ${isDisabled ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}
+                  relative flex flex-col items-center justify-center w-14 h-14 rounded-lg border-2 transition-all
+                  ${borderClass} ${bgClass}
+                  ${isDisabled ? 'cursor-not-allowed opacity-75' : 'cursor-grab active:cursor-grabbing'}
                 `}
                 disabled={isDisabled}
                 title={isAtLimit ? `Maximum ${MAX_SELECTED_SHAPES} shapes selected` : shape.replace('_', ' ')}
               >
-                <div className="w-4 h-4 flex items-center justify-center">
+                {isInPattern && !isSelected && (
+                  <div className="absolute top-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
+                )}
+                <div className="w-8 h-8 flex items-center justify-center">
                   <NauticalIcon shapeKey={shape} isSelected={isSelected} />
                 </div>
               </button>

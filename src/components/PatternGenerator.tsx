@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { DEFAULT_CONFIG, COLOR_PALETTES } from '../lib/types';
 import type { PatternConfig, ShapeType } from '../lib/types';
-import { generatePattern, patternToSVG } from '../lib/patternEngine';
-import { shapeSets, shapes } from '../lib/shapeSets.js';
+// @ts-ignore
+import { generatePattern, patternToSVG, calculatePatternLayout } from '../lib/patternEngine';
+import { availableShapes } from '../lib/shapeLoader.js';
 import ShapeSelector from './ShapeSelector';
 import ColorPickers from './ColorPickers';
 import PaletteSelector from './PaletteSelector';
@@ -12,7 +13,7 @@ import PaletteSelector from './PaletteSelector';
  */
 function generateRandomConfig(): PatternConfig {
   // 2. Pick nautical shapes (primitives and blocks are disabled)
-  const nauticalShapes: ShapeType[] = Object.keys(shapeSets.nautical.shapes) as ShapeType[];
+  const nauticalShapes: ShapeType[] = availableShapes.nautical as ShapeType[];
   const numShapes = Math.floor(Math.random() * 10) + 5; // 5-14 shapes
   const shuffled = [...nauticalShapes].sort(() => Math.random() - 0.5);
   const shapes = shuffled.slice(0, numShapes);
@@ -88,6 +89,24 @@ export default function PatternGenerator() {
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [selectedShape, setSelectedShape] = useState<{shapeType: ShapeType, x: number, y: number, cellIndex?: number} | null>(null);
   const [syncBackgroundColor, setSyncBackgroundColor] = useState(true); // Default to synced
+  const [draggedShape, setDraggedShape] = useState<ShapeType | null>(null);
+  const [dragOverCell, setDragOverCell] = useState<{row: number, col: number} | null>(null);
+  const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set()); // Track selected cells as "row_col" keys
+  const [swapAnimation, setSwapAnimation] = useState<Array<{from: string, to: string}> | null>(null); // Track swap animations
+  const [isDraggingFromGrid, setIsDraggingFromGrid] = useState(false);
+  const [draggedCellKey, setDraggedCellKey] = useState<string | null>(null);
+  const dragStartedRef = useRef(false); // Track if dragstart fired to prevent click selection
+  const occupiedCellsRef = useRef<Set<string>>(new Set()); // Track which cells have shapes
+  const [shapesInPattern, setShapesInPattern] = useState<Set<ShapeType>>(new Set()); // Track which shapes are in the current pattern
+  const randomPatternRef = useRef<Map<string, string>>(new Map()); // Cache random pattern: cellKey -> shapeId
+  const randomPatternSeedRef = useRef<number | null>(null); // Track seed used for cached pattern
+  const randomPatternConfigRef = useRef<string>(''); // Track config hash for cached pattern
+  const configRef = useRef<PatternConfig>(config); // Store latest config for event handlers
+  
+  // Keep configRef in sync
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
   
   // Undo/Redo system
   const [history, setHistory] = useState<PatternConfig[]>([initialConfig]);
@@ -136,7 +155,7 @@ export default function PatternGenerator() {
     });
   }, [config]);
 
-  // Add CSS for selected shape highlighting - highlight cell containers, not shapes
+  // Add CSS for selected shape highlighting and drag feedback
   useEffect(() => {
     const styleId = 'shape-selection-style';
     let styleElement = document.getElementById(styleId);
@@ -147,12 +166,13 @@ export default function PatternGenerator() {
       document.head.appendChild(styleElement);
     }
     
-    if (selectedShape) {
-      // Show solid blue border only on the actually selected cell
-      // Add pulsing animation using opacity
+    let styleContent = '';
+    
+        // Selected shape highlighting
+        if (selectedShape) {
       const selectedCellIndex = selectedShape.cellIndex !== undefined ? selectedShape.cellIndex.toString() : '';
       if (selectedCellIndex) {
-        styleElement.textContent = `
+        styleContent += `
           @keyframes pulseBorder {
             0%, 100% {
               stroke-opacity: 1;
@@ -172,55 +192,585 @@ export default function PatternGenerator() {
           }
         `;
       }
-    } else {
-      styleElement.textContent = '';
     }
     
+    styleElement.textContent = styleContent;
+    
     return () => {
-      // Cleanup on unmount
       if (styleElement && !selectedShape) {
         styleElement.textContent = '';
       }
     };
   }, [selectedShape]);
 
+  // Inject drag-overlay rectangles into SVG when dragging
+  useEffect(() => {
+    if (!svgContent || !dragOverCell) {
+      // Remove all overlay rects when not dragging
+      const svg = document.querySelector('[data-svg-container] svg');
+      if (svg) {
+        const overlays = svg.querySelectorAll('[data-drag-overlay], [data-drag-overlay-cell]');
+        overlays.forEach(el => el.remove());
+      }
+      return;
+    }
+
+    const container = document.querySelector('[data-svg-container]') as HTMLElement;
+    if (!container) return;
+    
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+
+    // Calculate layout
+    const layout = calculatePatternLayout({
+      containerSize: config.containerSize,
+      borderPadding: config.borderPadding,
+      lineSpacing: config.lineSpacing,
+      gridSize: config.gridSize,
+    });
+
+    const { tileSize, offsetX, offsetY } = layout;
+    const cellWidth = tileSize + config.lineSpacing;
+    const cellHeight = tileSize + config.lineSpacing;
+    const cellKey = `${dragOverCell.row}_${dragOverCell.col}`;
+    const isOccupied = occupiedCellsRef.current.has(cellKey);
+
+    // Remove existing overlays
+    const existingOverlays = svg.querySelectorAll('[data-drag-overlay], [data-drag-overlay-cell]');
+    existingOverlays.forEach(el => el.remove());
+
+    // Create overlay group
+    let overlayGroup = svg.querySelector('[data-drag-overlay-group]') as SVGGElement;
+    if (!overlayGroup) {
+      overlayGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      overlayGroup.setAttribute('data-drag-overlay-group', 'true');
+      overlayGroup.setAttribute('style', 'pointer-events: none;');
+      svg.appendChild(overlayGroup);
+    }
+
+    // Add faint white borders on all cells
+    for (let row = 0; row < config.gridSize; row++) {
+      for (let col = 0; col < config.gridSize; col++) {
+        const x = offsetX + (col * cellWidth);
+        const y = offsetY + (row * cellHeight);
+        const currentCellKey = `${row}_${col}`;
+        
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('data-drag-overlay', currentCellKey);
+        rect.setAttribute('x', x.toString());
+        rect.setAttribute('y', y.toString());
+        rect.setAttribute('width', tileSize.toString());
+        rect.setAttribute('height', tileSize.toString());
+        rect.setAttribute('stroke', '#ffffff');
+        rect.setAttribute('stroke-width', '1');
+        rect.setAttribute('stroke-opacity', '0.3');
+        rect.setAttribute('fill', 'none');
+        overlayGroup.appendChild(rect);
+      }
+    }
+
+    // Highlight the drag-over cell (red if occupied, white if empty)
+    const x = offsetX + (dragOverCell.col * cellWidth);
+    const y = offsetY + (dragOverCell.row * cellHeight);
+    
+    const highlightRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    highlightRect.setAttribute('data-drag-overlay-cell', cellKey);
+    highlightRect.setAttribute('x', x.toString());
+    highlightRect.setAttribute('y', y.toString());
+    highlightRect.setAttribute('width', tileSize.toString());
+    highlightRect.setAttribute('height', tileSize.toString());
+    highlightRect.setAttribute('stroke', isOccupied ? '#ef4444' : '#ffffff');
+    highlightRect.setAttribute('stroke-width', isOccupied ? '3' : '2');
+    highlightRect.setAttribute('stroke-opacity', isOccupied ? '0.9' : '0.6');
+    highlightRect.setAttribute('fill', 'none');
+    overlayGroup.appendChild(highlightRect);
+
+    return () => {
+      // Cleanup: remove overlays when component unmounts or dragOverCell changes
+      const overlays = svg.querySelectorAll('[data-drag-overlay], [data-drag-overlay-cell]');
+      overlays.forEach(el => el.remove());
+    };
+  }, [dragOverCell, svgContent, config.containerSize, config.borderPadding, config.lineSpacing, config.gridSize]);
+
+  // Inject selection border overlay when cells are selected
+  useEffect(() => {
+    if (!svgContent || selectedCells.size === 0) {
+      // Remove selection overlays when nothing is selected
+      const svg = document.querySelector('[data-svg-container] svg');
+      if (svg) {
+        const selectionOverlays = svg.querySelectorAll('[data-selection-overlay]');
+        selectionOverlays.forEach(el => el.remove());
+      }
+      return;
+    }
+
+    const container = document.querySelector('[data-svg-container]') as HTMLElement;
+    if (!container) return;
+    
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+
+    // Calculate layout
+    const layout = calculatePatternLayout({
+      containerSize: config.containerSize,
+      borderPadding: config.borderPadding,
+      lineSpacing: config.lineSpacing,
+      gridSize: config.gridSize,
+    });
+
+    const { tileSize, offsetX, offsetY } = layout;
+    const cellWidth = tileSize + config.lineSpacing;
+    const cellHeight = tileSize + config.lineSpacing;
+
+    // Remove existing selection overlays
+    const existingOverlays = svg.querySelectorAll('[data-selection-overlay]');
+    existingOverlays.forEach(el => el.remove());
+
+    // Create overlay group if it doesn't exist
+    let overlayGroup = svg.querySelector('[data-selection-overlay-group]') as SVGGElement;
+    if (!overlayGroup) {
+      overlayGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      overlayGroup.setAttribute('data-selection-overlay-group', 'true');
+      overlayGroup.setAttribute('style', 'pointer-events: none;');
+      svg.appendChild(overlayGroup);
+    }
+
+    // Add blue border for each selected cell
+    selectedCells.forEach(cellKey => {
+      const [row, col] = cellKey.split('_').map(Number);
+      const x = offsetX + (col * cellWidth);
+      const y = offsetY + (row * cellHeight);
+      
+      const selectionRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      selectionRect.setAttribute('data-selection-overlay', cellKey);
+      selectionRect.setAttribute('x', x.toString());
+      selectionRect.setAttribute('y', y.toString());
+      selectionRect.setAttribute('width', tileSize.toString());
+      selectionRect.setAttribute('height', tileSize.toString());
+      selectionRect.setAttribute('stroke', '#3b82f6'); // blue-600
+      selectionRect.setAttribute('stroke-width', '4');
+      selectionRect.setAttribute('stroke-opacity', '1');
+      selectionRect.setAttribute('fill', 'none');
+      overlayGroup.appendChild(selectionRect);
+    });
+
+    return () => {
+      // Cleanup on unmount
+      const svg = document.querySelector('[data-svg-container] svg');
+      if (svg) {
+        const selectionOverlays = svg.querySelectorAll('[data-selection-overlay]');
+        selectionOverlays.forEach(el => el.remove());
+      }
+    };
+  }, [selectedCells, svgContent, config.containerSize, config.borderPadding, config.lineSpacing, config.gridSize]);
+
+  // Add swap animation CSS and apply transforms
+  useEffect(() => {
+    if (!swapAnimation || swapAnimation.length === 0 || !svgContent) return;
+
+    const svg = document.querySelector('[data-svg-container] svg');
+    if (!svg) return;
+
+    const layout = calculatePatternLayout({
+      containerSize: config.containerSize,
+      borderPadding: config.borderPadding,
+      lineSpacing: config.lineSpacing,
+      gridSize: config.gridSize,
+    });
+
+    const { tileSize, offsetX, offsetY } = layout;
+    const cellWidth = tileSize + config.lineSpacing;
+    const cellHeight = tileSize + config.lineSpacing;
+
+    const allGroups: Array<{group: SVGGElement, dx: number, dy: number}> = [];
+
+    // Calculate transforms for all swaps
+    for (const swap of swapAnimation) {
+      const [fromRow, fromCol] = swap.from.split('_').map(Number);
+      const [toRow, toCol] = swap.to.split('_').map(Number);
+
+      const fromX = offsetX + (fromCol * cellWidth) + (tileSize / 2);
+      const fromY = offsetY + (fromRow * cellHeight) + (tileSize / 2);
+      const toX = offsetX + (toCol * cellWidth) + (tileSize / 2);
+      const toY = offsetY + (toRow * cellHeight) + (tileSize / 2);
+
+      const dx = toX - fromX;
+      const dy = toY - fromY;
+
+      // Find SVG groups for the cells being swapped
+      const fromGroups = svg.querySelectorAll(`[data-cell-key="${swap.from}"]`);
+      const toGroups = svg.querySelectorAll(`[data-cell-key="${swap.to}"]`);
+
+      fromGroups.forEach((group: Element) => {
+        allGroups.push({ group: group as SVGGElement, dx, dy });
+      });
+
+      toGroups.forEach((group: Element) => {
+        allGroups.push({ group: group as SVGGElement, dx: -dx, dy: -dy });
+      });
+    }
+
+    // Apply animation transforms to all groups
+    allGroups.forEach(({ group, dx, dy }) => {
+      group.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+      group.style.transform = `translate(${dx}, ${dy})`;
+    });
+
+    // Reset transforms after animation
+    const timeout = setTimeout(() => {
+      allGroups.forEach(({ group }) => {
+        group.style.transition = '';
+        group.style.transform = '';
+      });
+    }, 300);
+
+    return () => {
+      clearTimeout(timeout);
+      // Cleanup on unmount
+      allGroups.forEach(({ group }) => {
+        group.style.transition = '';
+        group.style.transform = '';
+      });
+    };
+  }, [swapAnimation, svgContent, config.containerSize, config.borderPadding, config.lineSpacing, config.gridSize]);
+
   // Regenerate pattern whenever config changes
   useEffect(() => {
-    try {
-      setError(null);
-      
-      // Validate config has required properties before generating
-      if (!config.containerSize || !Array.isArray(config.containerSize) || config.containerSize.length < 2) {
-        console.warn('Invalid containerSize, using default [800, 800]');
-        // Use default instead of setting config to avoid infinite loop
-        const defaultContainerSize: [number, number] = [800, 800];
-        const elements = generatePattern({ ...config, containerSize: defaultContainerSize });
-        const svg = patternToSVG(elements, defaultContainerSize, config.backgroundColor || '#ffffff');
+    let cancelled = false;
+    
+    async function generatePatternAsync() {
+      try {
+        console.log('[PatternGenerator] Regenerating pattern with config:', {
+          containerSize: config.containerSize,
+          gridSize: config.gridSize,
+          shapesCount: config.shapes?.length,
+          colorsCount: config.colors?.length,
+        });
+        
+        setError(null);
+        
+        // Validate config has required properties before generating
+        if (!config.containerSize || !Array.isArray(config.containerSize) || config.containerSize.length < 2) {
+          console.warn('[PatternGenerator] Invalid containerSize, using default [800, 800]');
+          return;
+        }
+        
+        if (!config.shapes || !Array.isArray(config.shapes) || config.shapes.length === 0) {
+          console.warn('[PatternGenerator] Invalid shapes, skipping generation');
+          setError('No shapes selected. Please select at least one shape.');
+          return;
+        }
+        
+        if (!config.colors || !Array.isArray(config.colors) || config.colors.length === 0) {
+          console.warn('[PatternGenerator] Invalid colors, skipping generation');
+          setError('No colors selected. Please select a color theme.');
+          return;
+        }
+        
+        // Build cells array from config
+        const cells: Array<{row: number, col: number, shapeId: string, bgColorIndex: number, fgColorIndex: number}> = [];
+        const gridSize = config.gridSize || 4;
+        
+        // Use seeded random for deterministic patterns
+        class SeededRandom {
+          private seed: number;
+          constructor(seed: number) {
+            this.seed = seed;
+          }
+          next() {
+            this.seed = (this.seed * 9301 + 49297) % 233280;
+            return this.seed / 233280;
+          }
+          choice<T>(array: T[]): T {
+            return array[Math.floor(this.next() * array.length)];
+          }
+        }
+        
+        const rng = new SeededRandom(config.seed || Date.now());
+        
+        // Check if we need to regenerate random pattern
+        // Only regenerate if seed, gridSize, emptySpace, or shapes changed
+        const configHash = `${config.seed}_${gridSize}_${config.emptySpace}_${config.shapes.join(',')}`;
+        const shouldRegenerateRandom = 
+          randomPatternSeedRef.current !== config.seed ||
+          randomPatternConfigRef.current !== configHash;
+        
+        if (shouldRegenerateRandom) {
+          // Generate and cache random pattern
+          randomPatternRef.current.clear();
+          const tempRng = new SeededRandom(config.seed || Date.now());
+          
+          for (let row = 0; row < gridSize; row++) {
+            for (let col = 0; col < gridSize; col++) {
+              const cellKey = `${row}_${col}`;
+              
+              // Skip if emptySpace says to leave empty
+              if (config.emptySpace > 0 && tempRng.next() * 100 < config.emptySpace) {
+                continue; // Don't cache empty cells
+              }
+              
+              // Pick random shape from selected shapes
+              const shapeId = tempRng.choice(config.shapes);
+              randomPatternRef.current.set(cellKey, shapeId);
+            }
+          }
+          
+          randomPatternSeedRef.current = config.seed || Date.now();
+          randomPatternConfigRef.current = configHash;
+        }
+        
+        // First, generate random pattern for all cells
+        // Use a Map to track which cells have shapes (for easy override)
+        const cellMap = new Map<string, {row: number, col: number, shapeId: string, bgColorIndex: number, fgColorIndex: number}>();
+        
+        for (let row = 0; row < gridSize; row++) {
+          for (let col = 0; col < gridSize; col++) {
+            const cellKey = `${row}_${col}`;
+            
+            // Check if this cell is manually placed or deleted
+            const manualShape = config.manualShapes?.[cellKey];
+            
+            if (manualShape === '__DELETED__') {
+              // Skip deleted cells
+              continue;
+            }
+            
+            if (manualShape) {
+              // Use manual shape (overrides random) - TypeScript knows it's ShapeType here
+              cellMap.set(cellKey, {
+                row,
+                col,
+                shapeId: manualShape,
+                bgColorIndex: 0,
+                fgColorIndex: 1,
+              });
+            } else {
+              // Use cached random pattern
+              const randomShapeId = randomPatternRef.current.get(cellKey);
+              if (randomShapeId) {
+                cellMap.set(cellKey, {
+                  row,
+                  col,
+                  shapeId: randomShapeId,
+                  bgColorIndex: 0,
+                  fgColorIndex: 1,
+                });
+              }
+              // If not in cache (empty cell), skip it
+            }
+          }
+        }
+        
+        // Convert map to array
+        cells.push(...Array.from(cellMap.values()));
+        
+        // Store occupied cells for drag-over detection
+        occupiedCellsRef.current = new Set(cellMap.keys());
+        
+        // Track which shapes are in the pattern
+        const shapesInUse = new Set<ShapeType>();
+        cellMap.forEach(cell => {
+          shapesInUse.add(cell.shapeId as ShapeType);
+        });
+        setShapesInPattern(shapesInUse);
+        
+        console.log('[PatternGenerator] Built cells array:', cells.length, 'cells');
+        console.log('[PatternGenerator] Calling async generatePattern...');
+        
+        // Call new async generatePattern
+        const elements = await generatePattern(config, cells);
+        
+        if (cancelled) return;
+        
+        console.log('[PatternGenerator] Generated elements:', elements.length);
+        
+        console.log('[PatternGenerator] Calling patternToSVG...');
+        const svg = patternToSVG(elements, config.containerSize, config.backgroundColor || '#ffffff');
+        console.log('[PatternGenerator] Generated SVG, length:', svg.length);
+        
+        if (cancelled) return;
+        
         setSvgContent(svg);
-        return;
+      } catch (err) {
+        if (cancelled) return;
+        
+        const errorMessage = err instanceof Error ? err.message : 'Failed to generate pattern';
+        console.error('[PatternGenerator] Pattern generation error:', err);
+        console.error('[PatternGenerator] Error stack:', err instanceof Error ? err.stack : 'No stack');
+        setError(errorMessage);
+        setSvgContent('');
       }
-      
-      if (!config.shapes || !Array.isArray(config.shapes) || config.shapes.length === 0) {
-        console.warn('Invalid shapes, skipping generation');
-        return;
-      }
-      
-      if (!config.colors || !Array.isArray(config.colors) || config.colors.length === 0) {
-        console.warn('Invalid colors, skipping generation');
-        return;
-      }
-      
-      // Use containerSize directly
-      const elements = generatePattern(config);
-      const svg = patternToSVG(elements, config.containerSize, config.backgroundColor);
-      setSvgContent(svg);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to generate pattern';
-      setError(errorMessage);
-      setSvgContent('');
-      console.error('Pattern generation error:', err);
     }
+    
+    generatePatternAsync();
+    
+    return () => {
+      cancelled = true;
+    };
   }, [config]);
+  
+  // Reattach drag listeners after SVG content updates
+  useEffect(() => {
+    if (!svgContent) return;
+    
+    const container = document.querySelector('[data-svg-container]') as HTMLElement;
+    if (!container) return;
+    
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+    
+    // Create fresh handlers with current config/state values
+    const dragStartHandler = (e: DragEvent) => {
+      // Mark that drag started
+      dragStartedRef.current = true;
+      
+      console.log('[Drag] dragstart event fired (reattached)', {
+        target: e.target,
+        targetTag: (e.target as HTMLElement)?.tagName,
+        hasDataShapeType: (e.target as HTMLElement)?.hasAttribute('data-shape-type'),
+        hasDataCellIndex: (e.target as HTMLElement)?.hasAttribute('data-cell-index'),
+        hasDataCellKey: (e.target as HTMLElement)?.hasAttribute('data-cell-key'),
+        isDraggable: (e.target as HTMLElement)?.getAttribute('draggable'),
+        manualShapes: config.manualShapes
+      });
+      
+      const target = e.target as HTMLElement;
+      
+      // Don't drag if clicking on selection border
+      if (target.hasAttribute('data-selected-shape') && !target.hasAttribute('data-shape-type')) {
+        console.log('[Drag] Ignoring drag on selection border');
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      
+      // For multi-slot shapes, we might click on a path element
+      let shapeType = target.getAttribute('data-shape-type') as ShapeType | null;
+      let cellIndex = target.getAttribute('data-cell-index');
+      let cellKey = target.getAttribute('data-cell-key');
+      
+      // If we don't have the data on the clicked element, try to find it from parent or siblings
+      if (!shapeType || !cellIndex) {
+        const parent = target.parentElement;
+        if (parent) {
+          const allElements = parent.querySelectorAll('[data-shape-type]');
+          for (const el of Array.from(allElements)) {
+            const elShapeType = el.getAttribute('data-shape-type');
+            const elCellIndex = el.getAttribute('data-cell-index');
+            const elCellKey = el.getAttribute('data-cell-key');
+            
+            if (elCellKey === cellKey || (elCellIndex === cellIndex && elCellIndex)) {
+              shapeType = elShapeType as ShapeType | null;
+              cellIndex = elCellIndex;
+              cellKey = elCellKey;
+              break;
+            }
+          }
+        }
+      }
+      
+      console.log('[Drag] Extracted data', { shapeType, cellIndex, cellKey });
+      
+      if (shapeType && cellIndex !== null) {
+        const finalCellKey = cellKey || (() => {
+          const idx = parseInt(cellIndex, 10);
+          const row = Math.floor(idx / config.gridSize);
+          const col = idx % config.gridSize;
+          return `${row}_${col}`;
+        })();
+        
+        console.log('[Drag] Final cell key', { finalCellKey, isManualShape: config.manualShapes?.[finalCellKey] });
+        
+        // Always allow dragging shapes on the grid
+        if (finalCellKey) {
+          if (!e.dataTransfer) return;
+          console.log('[Drag] Allowing drag, setting data transfer');
+          e.dataTransfer.setData('text/plain', shapeType);
+          e.dataTransfer.setData('application/x-cell-key', finalCellKey);
+          e.dataTransfer.effectAllowed = 'move';
+          setDraggedShape(shapeType);
+          setIsDraggingFromGrid(true);
+          setDraggedCellKey(finalCellKey);
+          
+          const svgEl = target.closest('svg');
+          if (svgEl) {
+            const cellElements = svgEl.querySelectorAll(`[data-cell-key="${finalCellKey}"]`);
+            cellElements.forEach((el: Element) => {
+              if (el instanceof SVGElement && el.hasAttribute('data-shape-type')) {
+                el.style.opacity = '0.5';
+                el.style.cursor = 'grabbing';
+              }
+            });
+          }
+        } else {
+          console.log('[Drag] Drag not allowed - conditions not met');
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      } else {
+        console.log('[Drag] Missing required data', { shapeType, cellIndex });
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    
+    const dragEndHandler = (e: DragEvent) => {
+      console.log('[Drag] dragend event fired (reattached)');
+      const target = e.target as HTMLElement;
+      
+      const svgEl = target.closest('svg');
+      if (svgEl && draggedCellKey) {
+        const cellElements = svgEl.querySelectorAll(`[data-cell-key="${draggedCellKey}"]`);
+        cellElements.forEach((el: Element) => {
+          if (el instanceof SVGElement && el.hasAttribute('data-shape-type')) {
+            el.style.opacity = '';
+            el.style.cursor = '';
+          }
+        });
+      } else if (target instanceof SVGElement) {
+        target.style.opacity = '';
+        target.style.cursor = '';
+      }
+      
+      setDraggedShape(null);
+      setDragOverCell(null);
+      setIsDraggingFromGrid(false);
+      setDraggedCellKey(null);
+    };
+    
+    // Small delay to ensure SVG is fully rendered
+    const timeoutId = setTimeout(() => {
+      const draggableElements = svg.querySelectorAll('[draggable="true"]');
+      console.log('[PatternGenerator] Reattaching listeners to', draggableElements.length, 'elements after SVG update');
+      
+      // Clean up old listeners first
+      draggableElements.forEach((svgEl: Element) => {
+        const oldStart = (svgEl as any).__dragStartHandler;
+        const oldEnd = (svgEl as any).__dragEndHandler;
+        if (oldStart) {
+          svgEl.removeEventListener('dragstart', oldStart, true);
+        }
+        if (oldEnd) {
+          svgEl.removeEventListener('dragend', oldEnd, true);
+        }
+      });
+      
+      // Attach new listeners with fresh closures
+      draggableElements.forEach((svgEl: Element) => {
+        svgEl.addEventListener('dragstart', dragStartHandler as EventListener, true);
+        svgEl.addEventListener('dragend', dragEndHandler as EventListener, true);
+        (svgEl as any).__dragListenerAttached = true;
+        (svgEl as any).__dragStartHandler = dragStartHandler;
+        (svgEl as any).__dragEndHandler = dragEndHandler;
+      });
+      
+      // Also update container handlers
+      (container as any).__dragStartHandler = dragStartHandler;
+      (container as any).__dragEndHandler = dragEndHandler;
+    }, 150);
+    
+    return () => clearTimeout(timeoutId);
+  }, [svgContent, config.gridSize, config.manualShapes, draggedCellKey]);
 
   // Track window size for responsive preview
   useEffect(() => {
@@ -244,6 +794,194 @@ export default function PatternGenerator() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Keyboard shortcuts for Undo/Redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in inputs, textareas, or contenteditable elements
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      // Delete/Backspace: Delete selected cells (works without modifiers)
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCells.size > 0) {
+        e.preventDefault();
+        setConfig(prev => {
+          const newManualShapes = { ...prev.manualShapes || {} };
+          // Mark all selected cells as deleted
+          selectedCells.forEach(cellKey => {
+            newManualShapes[cellKey] = '__DELETED__' as any;
+          });
+          return {
+            ...prev,
+            manualShapes: newManualShapes
+          };
+        });
+        setSelectedCells(new Set());
+        return;
+      }
+
+      // Arrow keys: Move selected cell(s)
+      if (selectedCells.size > 0 && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        const currentConfig = configRef.current;
+        
+        // Calculate direction
+        let deltaRow = 0;
+        let deltaCol = 0;
+        if (e.key === 'ArrowUp') {
+          deltaRow = -1;
+        } else if (e.key === 'ArrowDown') {
+          deltaRow = 1;
+        } else if (e.key === 'ArrowLeft') {
+          deltaCol = -1;
+        } else if (e.key === 'ArrowRight') {
+          deltaCol = 1;
+        }
+        
+        // Calculate new positions for all selected cells
+        const cellMoves = new Map<string, string>(); // oldKey -> newKey
+        let canMove = true;
+        
+        for (const selectedCellKey of selectedCells) {
+          const [row, col] = selectedCellKey.split('_').map(Number);
+          const newRow = row + deltaRow;
+          const newCol = col + deltaCol;
+          
+          // Check bounds
+          if (newRow < 0 || newRow >= currentConfig.gridSize || newCol < 0 || newCol >= currentConfig.gridSize) {
+            canMove = false;
+            break;
+          }
+          
+          const newCellKey = `${newRow}_${newCol}`;
+          cellMoves.set(selectedCellKey, newCellKey);
+        }
+        
+        // If any cell would go out of bounds, don't move any
+        if (!canMove) {
+          return;
+        }
+        
+        // Perform swaps for all cells
+        setConfig(prev => {
+          const newManualShapes = { ...prev.manualShapes || {} };
+          
+          // Create a map of all swaps needed (handling chains)
+          // We need to do this carefully to handle circular swaps
+          const swapPairs: Array<{from: string, to: string}> = [];
+          for (const [oldKey, newKey] of cellMoves.entries()) {
+            swapPairs.push({ from: oldKey, to: newKey });
+          }
+          
+          // Get all values before swapping
+          const values = new Map<string, ShapeType | '__DELETED__' | null>();
+          for (const { from, to } of swapPairs) {
+            // Get current value
+            let fromValue: ShapeType | '__DELETED__' | null = newManualShapes[from] || null;
+            if (fromValue === null) {
+              const randomShape = randomPatternRef.current.get(from);
+              if (randomShape) {
+                fromValue = randomShape as ShapeType;
+              }
+            }
+            values.set(from, fromValue);
+            
+            // Get target value
+            let toValue: ShapeType | '__DELETED__' | null = newManualShapes[to] || null;
+            if (toValue === null) {
+              const randomShape = randomPatternRef.current.get(to);
+              if (randomShape) {
+                toValue = randomShape as ShapeType;
+              }
+            }
+            values.set(to, toValue);
+          }
+          
+          // Perform swaps
+          for (const { from, to } of swapPairs) {
+            const fromValue = values.get(from) ?? null;
+            const toValue = values.get(to) ?? null;
+            
+            // Set new values
+            if (fromValue !== null && fromValue !== '__DELETED__') {
+              newManualShapes[to] = fromValue;
+            } else if (fromValue === '__DELETED__') {
+              newManualShapes[to] = '__DELETED__';
+            } else {
+              delete newManualShapes[to];
+            }
+            
+            if (toValue !== null && toValue !== '__DELETED__') {
+              newManualShapes[from] = toValue;
+            } else if (toValue === '__DELETED__') {
+              newManualShapes[from] = '__DELETED__';
+            } else {
+              delete newManualShapes[from];
+            }
+          }
+          
+          // Trigger animation for all swaps
+          if (swapPairs.length > 0) {
+            setSwapAnimation(swapPairs);
+            setTimeout(() => setSwapAnimation(null), 300);
+          }
+          
+          return {
+            ...prev,
+            manualShapes: newManualShapes
+          };
+        });
+        
+        // Update selection to new positions
+        const newSelectedCells = new Set(Array.from(selectedCells).map(oldKey => cellMoves.get(oldKey) || oldKey));
+        setSelectedCells(newSelectedCells);
+        
+        return;
+      }
+
+      // Check for CMD (Mac) or CTRL (PC) modifier
+      const isModifierPressed = e.metaKey || e.ctrlKey;
+      
+      if (!isModifierPressed) return;
+
+      // Undo: CMD+Z (Mac) or CTRL+Z (PC)
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        if (historyIndex > 0) {
+          isUndoRedoRef.current = true;
+          const newIndex = historyIndex - 1;
+          const prevConfig = history[newIndex];
+          setConfig(JSON.parse(JSON.stringify(prevConfig))); // Deep copy
+          setHistoryIndex(newIndex);
+          historyIndexRef.current = newIndex;
+        }
+        return;
+      }
+
+      // Redo: CMD+Shift+Z (Mac) or CTRL+Shift+Z (PC)
+      if (e.key === 'z' && e.shiftKey) {
+        e.preventDefault();
+        if (historyIndex < history.length - 1) {
+          isUndoRedoRef.current = true;
+          const newIndex = historyIndex + 1;
+          const nextConfig = history[newIndex];
+          setConfig(JSON.parse(JSON.stringify(nextConfig))); // Deep copy
+          setHistoryIndex(newIndex);
+          historyIndexRef.current = newIndex;
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [historyIndex, history, selectedCells]); // Dependencies for undo/redo state and selectedCells
 
   // Calculate preview dimensions that fit within viewport
   // Container is fixed at 800×800px (1:1)
@@ -367,6 +1105,19 @@ export default function PatternGenerator() {
     setConfig(prev => ({
       ...prev,
       shapes: shapes,
+    }));
+  };
+
+  // Handle clear grid - clears all manual shapes and selects a single random shape
+  const handleClearGrid = () => {
+    const nauticalShapes = availableShapes.nautical as ShapeType[];
+    const randomIndex = Math.floor(Math.random() * nauticalShapes.length);
+    const randomShape = nauticalShapes[randomIndex];
+    
+    setConfig(prev => ({
+      ...prev,
+      manualShapes: {}, // Clear all manual shapes
+      shapes: [randomShape], // Select single random shape
     }));
   };
 
@@ -508,7 +1259,7 @@ export default function PatternGenerator() {
         // 1. Get all available shapes from any set (1-9 shapes)
         const allShapes: ShapeType[] = [
           // Primitives and blocks are disabled - only nautical shapes
-          ...Object.keys(shapeSets.nautical.shapes)
+          ...availableShapes.nautical
         ] as ShapeType[];
         
         // Randomly select 1-9 shapes
@@ -673,61 +1424,20 @@ export default function PatternGenerator() {
     return permutations;
   };
 
-  // Handle shuffle colors for a specific shape type - cycles through permutations
+  // TEMPORARILY DISABLED: Handle shuffle colors for a specific shape type
+  // TODO: Rebuild this for the new 2-color SVG system
+  // The new system uses bgColorIndex and fgColorIndex instead of slot-based colors
+  /*
   const handleShuffleShapeColors = (shapeType: ShapeType) => {
-    // Generate shape at dummy position to get its slots
-    const dummyShape = shapes[shapeType](0, 0, 100);
-    
-    if (!Array.isArray(dummyShape)) {
-      // Single-color shape - just use first color
-      setConfig(prev => ({
-        ...prev,
-        shapeColorOverrides: {
-          ...prev.shapeColorOverrides,
-          [shapeType]: { 1: prev.colors[0] }
-        }
-      }));
-      return;
-    }
-
-    // Get unique slots used by this shape
-    const usedSlots = [...new Set(dummyShape.map(el => el.slot || 1))].sort((a, b) => a - b);
-    const numSlots = usedSlots.length;
-    
-    // Generate all permutations of theme colors for the number of slots needed
-    const allPermutations = generateColorPermutations(config.colors, numSlots);
-    
-    if (allPermutations.length === 0) {
-      // Fallback if no permutations
-      return;
-    }
-    
-    // Get current shuffle index for this shape type (default to -1, so first shuffle is index 0)
-    const currentShuffleIndex = (config.shapeColorOverrides?.[shapeType]?._shuffleIndex as number | undefined) ?? -1;
-    
-    // Cycle to next permutation
-    const nextIndex = (currentShuffleIndex + 1) % allPermutations.length;
-    const selectedPermutation = allPermutations[nextIndex];
-    
-    // Create override mapping: slot number → color from permutation
-    const slotColorMap: Record<number, string> = {
-      _shuffleIndex: nextIndex // Store the index for next shuffle
-    };
-    usedSlots.forEach((slot, index) => {
-      slotColorMap[slot] = selectedPermutation[index % selectedPermutation.length];
-    });
-
-    // Update config with new color overrides
-    setConfig(prev => ({
-      ...prev,
-      shapeColorOverrides: {
-        ...prev.shapeColorOverrides,
-        [shapeType]: slotColorMap
-      }
-    }));
+    // OLD SYSTEM: Used shapes[shapeType](x, y, size) to get slot information
+    // NEW SYSTEM: Shapes are 2-color SVGs loaded from files
+    // This function needs to be rewritten to work with bgColorIndex/fgColorIndex
   };
+  */
 
-  // Handle cancel/revert colors for a specific shape type
+  // TEMPORARILY DISABLED: Handle cancel/revert colors for a specific shape type
+  // TODO: Rebuild this for the new 2-color SVG system
+  /*
   const handleCancelShapeColors = (shapeType: ShapeType) => {
     setConfig(prev => {
       const newOverrides = { ...prev.shapeColorOverrides };
@@ -738,6 +1448,185 @@ export default function PatternGenerator() {
       };
     });
     setSelectedShape(null);
+  };
+  */
+
+  // Calculate which grid cell a point (x, y) is in
+  // Use configRef to always get latest config
+  const getCellFromPoint = useCallback((x: number, y: number): {row: number, col: number} | null => {
+    try {
+      const currentConfig = configRef.current;
+      const layout = calculatePatternLayout({
+        containerSize: currentConfig.containerSize,
+        borderPadding: currentConfig.borderPadding,
+        lineSpacing: currentConfig.lineSpacing,
+        gridSize: currentConfig.gridSize,
+      });
+      
+      const { tileSize, offsetX, offsetY } = layout;
+      const cellWidth = tileSize + currentConfig.lineSpacing;
+      const cellHeight = tileSize + currentConfig.lineSpacing;
+      
+      // Calculate relative position
+      const relX = x - offsetX;
+      const relY = y - offsetY;
+      
+      // Find which cell
+      const col = Math.floor(relX / cellWidth);
+      const row = Math.floor(relY / cellHeight);
+      
+      // Check if within bounds
+      if (row >= 0 && row < currentConfig.gridSize && col >= 0 && col < currentConfig.gridSize) {
+        // Check if point is within the actual cell (not in spacing area)
+        const cellX = col * cellWidth;
+        const cellY = row * cellHeight;
+        if (relX >= cellX && relX < cellX + tileSize && relY >= cellY && relY < cellY + tileSize) {
+          return { row, col };
+        }
+      }
+      
+      return null;
+    } catch (err) {
+      console.error('[PatternGenerator] Error in getCellFromPoint:', err);
+      return null;
+    }
+  }, []); // Empty deps - uses configRef.current
+
+  // Handle drag over grid
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    console.log('[Drag] handleDragOver called', {
+      target: e.target,
+      currentTarget: e.currentTarget,
+      hasDataTransfer: !!e.dataTransfer
+    });
+    
+    const svgElement = (e.currentTarget as HTMLElement).querySelector('svg');
+    if (!svgElement) {
+      console.log('[Drag] No SVG element found');
+      return;
+    }
+    
+    const svgRect = svgElement.getBoundingClientRect();
+    const svgViewBox = svgElement.viewBox.baseVal;
+    const svgWidth = svgRect.width;
+    const svgHeight = svgRect.height;
+    
+    // Convert mouse coordinates to SVG coordinates
+    const mouseX = e.clientX - svgRect.left;
+    const mouseY = e.clientY - svgRect.top;
+    
+    // Scale to SVG viewBox coordinates
+    const x = (mouseX / svgWidth) * svgViewBox.width;
+    const y = (mouseY / svgHeight) * svgViewBox.height;
+    
+    const cell = getCellFromPoint(x, y);
+    setDragOverCell(cell);
+    
+    if (cell && e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy';
+      console.log('[Drag] Dragging over cell', cell, { x, y, mouseX, mouseY });
+    } else {
+      console.log('[Drag] No cell found or no dataTransfer', { cell, hasDataTransfer: !!e.dataTransfer });
+    }
+  };
+
+  // Handle drop on grid
+  const handleDrop = (e: React.DragEvent) => {
+    console.log('[Drag] drop event fired');
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!e.dataTransfer) return;
+    
+    const shapeType = e.dataTransfer.getData('text/plain') as ShapeType;
+    const sourceCellKey = e.dataTransfer.getData('application/x-cell-key');
+    
+    console.log('[Drag] Drop data', { shapeType, sourceCellKey });
+    
+    if (!shapeType) {
+      console.log('[Drag] No shape type in drop data');
+      return;
+    }
+    
+    const svgElement = (e.currentTarget as HTMLElement).querySelector('svg');
+    if (!svgElement) {
+      console.log('[Drag] No SVG element found in drop');
+      return;
+    }
+    
+    const svgRect = svgElement.getBoundingClientRect();
+    const svgViewBox = svgElement.viewBox.baseVal;
+    const svgWidth = svgRect.width;
+    const svgHeight = svgRect.height;
+    
+    // Convert mouse coordinates to SVG coordinates
+    const mouseX = e.clientX - svgRect.left;
+    const mouseY = e.clientY - svgRect.top;
+    
+    // Scale to SVG viewBox coordinates
+    const x = (mouseX / svgWidth) * svgViewBox.width;
+    const y = (mouseY / svgHeight) * svgViewBox.height;
+    
+    const cell = getCellFromPoint(x, y);
+    console.log('[Drag] Drop cell', { cell, x, y });
+    
+    if (cell) {
+      const cellKey = `${cell.row}_${cell.col}`;
+      
+      // If dragging from grid, remove from source first
+      if (sourceCellKey && sourceCellKey !== cellKey) {
+        setConfig(prev => {
+          const newManualShapes = { ...prev.manualShapes || {} };
+          delete newManualShapes[sourceCellKey];
+          newManualShapes[cellKey] = shapeType;
+          return {
+            ...prev,
+            manualShapes: newManualShapes
+          };
+        });
+      } else {
+        // Dropping from sidebar
+        setConfig(prev => ({
+          ...prev,
+          manualShapes: {
+            ...prev.manualShapes || {},
+            [cellKey]: shapeType
+          }
+        }));
+      }
+    } else if (sourceCellKey) {
+      // Dragging outside grid - delete the shape
+      setConfig(prev => {
+        const newManualShapes = { ...prev.manualShapes || {} };
+        delete newManualShapes[sourceCellKey];
+        return {
+          ...prev,
+          manualShapes: newManualShapes
+        };
+      });
+    }
+    
+    setDraggedShape(null);
+    setDragOverCell(null);
+    setIsDraggingFromGrid(false);
+    setDraggedCellKey(null);
+  };
+
+  // Handle drag start from sidebar
+  const handleDragStartFromSidebar = (shapeType: ShapeType) => {
+    setDraggedShape(shapeType);
+    setIsDraggingFromGrid(false);
+  };
+
+  // Handle drag leave
+  const handleDragLeave = (e: React.DragEvent) => {
+    // Only clear if actually leaving the container
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDragOverCell(null);
+    }
   };
 
 
@@ -882,6 +1771,8 @@ export default function PatternGenerator() {
             <ShapeSelector
               selectedShapes={config.shapes}
               onSelectionChange={handleShapesChange}
+              shapesInPattern={shapesInPattern}
+              onClearGrid={handleClearGrid}
             />
           </div>
 
@@ -919,16 +1810,81 @@ Redo
           <button
             type="button"
             onClick={() => {
-              setConfig(prev => ({
-                ...prev,
-                seed: Date.now(),
-                // Preserve shapeColorOverrides so colors don't change
-                shapeColorOverrides: prev.shapeColorOverrides
-              }));
+              setConfig(prev => {
+                // If there are manual shapes, shuffle their positions
+                if (prev.manualShapes && Object.keys(prev.manualShapes).length > 0) {
+                  // Separate shapes and deleted cells
+                  const shapeTypes = Object.values(prev.manualShapes).filter((s): s is ShapeType => s !== '__DELETED__');
+                  const deletedCellKeys = Object.keys(prev.manualShapes).filter(
+                    key => prev.manualShapes![key] === '__DELETED__'
+                  );
+                  
+                  const gridSize = prev.gridSize;
+                  const totalCells = gridSize * gridSize;
+                  
+                  // Create array of all cell keys
+                  const allCellKeys: string[] = [];
+                  for (let row = 0; row < gridSize; row++) {
+                    for (let col = 0; col < gridSize; col++) {
+                      allCellKeys.push(`${row}_${col}`);
+                    }
+                  }
+                  
+                  // Shuffle the cell keys
+                  const shuffledCells = [...allCellKeys].sort(() => Math.random() - 0.5);
+                  
+                  // Create new manualShapes mapping with shuffled positions
+                  const newManualShapes: Record<string, ShapeType | '__DELETED__'> = {};
+                  
+                  // First, preserve deleted cells in their original positions
+                  deletedCellKeys.forEach(cellKey => {
+                    newManualShapes[cellKey] = '__DELETED__';
+                  });
+                  
+                  // Then, place shuffled shapes in remaining cells (excluding deleted ones)
+                  const availableCells = shuffledCells.filter(key => !deletedCellKeys.includes(key));
+                  shapeTypes.forEach((shapeType, index) => {
+                    if (index < availableCells.length) {
+                      newManualShapes[availableCells[index]] = shapeType;
+                    }
+                  });
+                  
+                  return {
+                    ...prev,
+                    seed: Date.now(), // Update seed for any random elements
+                    manualShapes: newManualShapes,
+                    // Preserve shapeColorOverrides so colors don't change
+                    shapeColorOverrides: prev.shapeColorOverrides
+                  };
+                } else {
+                  // Normal refresh - just change seed
+                  return {
+                    ...prev,
+                    seed: Date.now(),
+                    // Preserve shapeColorOverrides so colors don't change
+                    shapeColorOverrides: prev.shapeColorOverrides
+                  };
+                }
+              });
             }}
             className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200"
           >
 Refresh Layout
+          </button>
+
+          {/* Clear Pattern */}
+          <button
+            type="button"
+            onClick={() => {
+              setConfig(prev => ({
+                ...prev,
+                manualShapes: {}, // Clear all manually placed shapes
+                emptySpace: 100 // Set to 100% to make all cells empty
+              }));
+            }}
+            className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200"
+          >
+Clear Pattern
           </button>
 
           {/* Randomize All (randomizes everything like initial page load) */}
@@ -979,15 +1935,141 @@ Randomize All
                   <div
                     ref={(el) => {
                       if (el) {
-                        // Remove old listener if exists
+                        // Only set up once - check if already initialized
+                        if ((el as any).__listenersInitialized) {
+                          return;
+                        }
+                        
+                        console.log('[PatternGenerator] Setting up event listeners on SVG container', {
+                          hasSvg: !!el.querySelector('svg')
+                        });
+                        
+                        (el as any).__listenersInitialized = true;
+                        
+                        // Remove old listeners if exist
                         el.onclick = null;
-                        // Add click event delegation
+                        
+                        // Clean up old dragstart and dragend listeners
+                        const oldDragStart = (el as any).__dragStartHandler;
+                        const oldDragEnd = (el as any).__dragEndHandler;
+                        if (oldDragStart) {
+                          el.removeEventListener('dragstart', oldDragStart);
+                        }
+                        if (oldDragEnd) {
+                          el.removeEventListener('dragend', oldDragEnd);
+                        }
+                        
+                        // Track mouse down position to distinguish clicks from drags
+                        let mouseDownPos: {x: number, y: number} | null = null;
+                        let isDragging = false;
+                        let mouseDownTime = 0;
+                        
+                        el.onmousedown = (e: MouseEvent) => {
+                          const target = e.target as HTMLElement;
+                          if (target.closest('.shape-toolbar')) {
+                            return;
+                          }
+                          // Reset drag flag
+                          dragStartedRef.current = false;
+                          // Don't interfere with draggable elements - let dragstart handle it
+                          if (target.hasAttribute('draggable') || target.closest('[draggable="true"]')) {
+                            // Store mouse down position but don't prevent drag
+                            mouseDownPos = { x: e.clientX, y: e.clientY };
+                            mouseDownTime = Date.now();
+                            isDragging = false;
+                            // Don't prevent default - allow drag to start
+                            return;
+                          }
+                          // Store mouse down position
+                          mouseDownPos = { x: e.clientX, y: e.clientY };
+                          mouseDownTime = Date.now();
+                          isDragging = false;
+                        };
+                        
+                        el.onmousemove = (e: MouseEvent) => {
+                          // If mouse moved more than 5px, it's a drag, not a click
+                          if (mouseDownPos) {
+                            const dx = Math.abs(e.clientX - mouseDownPos.x);
+                            const dy = Math.abs(e.clientY - mouseDownPos.y);
+                            if (dx > 5 || dy > 5) {
+                              isDragging = true;
+                            }
+                          }
+                        };
+                        
+                        // Add click event delegation - only select if it wasn't a drag
                         el.onclick = (e: MouseEvent) => {
+                          // If dragstart fired, don't select
+                          if (dragStartedRef.current) {
+                            dragStartedRef.current = false;
+                            mouseDownPos = null;
+                            isDragging = false;
+                            return;
+                          }
+                          
+                          // If this was a drag (mouse moved >5px), don't select
+                          if (isDragging) {
+                            mouseDownPos = null;
+                            isDragging = false;
+                            return;
+                          }
+                          
+                          // Also check if enough time has passed (quick clicks might be drags)
+                          const timeSinceMouseDown = Date.now() - mouseDownTime;
+                          if (timeSinceMouseDown > 200) {
+                            // Too long, probably a drag
+                            mouseDownPos = null;
+                            isDragging = false;
+                            return;
+                          }
+                          
                           const target = e.target as HTMLElement;
                           // Don't select if clicking on toolbar
                           if (target.closest('.shape-toolbar')) {
                             return;
                           }
+                          
+                          // Get SVG element to calculate cell position
+                          const svgElement = el.querySelector('svg');
+                          if (svgElement) {
+                            const svgRect = svgElement.getBoundingClientRect();
+                            const svgViewBox = svgElement.viewBox.baseVal;
+                            const svgWidth = svgRect.width;
+                            const svgHeight = svgRect.height;
+                            
+                            // Convert mouse coordinates to SVG coordinates
+                            const mouseX = e.clientX - svgRect.left;
+                            const mouseY = e.clientY - svgRect.top;
+                            
+                            // Scale to SVG viewBox coordinates
+                            const x = (mouseX / svgWidth) * svgViewBox.width;
+                            const y = (mouseY / svgHeight) * svgViewBox.height;
+                            
+                            // Get cell from point
+                            const cell = getCellFromPoint(x, y);
+                            if (cell) {
+                              const cellKey = `${cell.row}_${cell.col}`;
+                              
+                              if (e.shiftKey) {
+                                // SHIFT+Click: Toggle cell in selection
+                                setSelectedCells(prev => {
+                                  const newSelection = new Set(prev);
+                                  if (newSelection.has(cellKey)) {
+                                    // Remove if already selected
+                                    newSelection.delete(cellKey);
+                                  } else {
+                                    // Add to selection
+                                    newSelection.add(cellKey);
+                                  }
+                                  return newSelection;
+                                });
+                              } else {
+                                // Regular click: Clear selection and select only this cell
+                                setSelectedCells(new Set([cellKey]));
+                              }
+                            }
+                          }
+                          
                           const shapeType = target.getAttribute('data-shape-type') as ShapeType | null;
                           const cellIndex = target.getAttribute('data-cell-index');
                           if (shapeType) {
@@ -1008,21 +2090,195 @@ Randomize All
                             // Click outside shape - close toolbar
                             setSelectedShape(null);
                           }
+                          mouseDownPos = null;
+                          isDragging = false;
                         };
+                        
+                        // Add drag start delegation for shapes - use capture phase to catch events early
+                        const dragStartHandler = (e: DragEvent) => {
+                          // Mark that drag started
+                          dragStartedRef.current = true;
+                          
+                          console.log('[Drag] dragstart event fired', {
+                            target: e.target,
+                            targetTag: (e.target as HTMLElement)?.tagName,
+                            hasDataShapeType: (e.target as HTMLElement)?.hasAttribute('data-shape-type'),
+                            hasDataCellIndex: (e.target as HTMLElement)?.hasAttribute('data-cell-index'),
+                            hasDataCellKey: (e.target as HTMLElement)?.hasAttribute('data-cell-key'),
+                            isDraggable: (e.target as HTMLElement)?.getAttribute('draggable'),
+                            manualShapes: config.manualShapes,
+                            currentTarget: e.currentTarget
+                          });
+                          
+                          const target = e.target as HTMLElement;
+                          
+                          // Don't drag if clicking on selection border
+                          if (target.hasAttribute('data-selected-shape') && !target.hasAttribute('data-shape-type')) {
+                            console.log('[Drag] Ignoring drag on selection border');
+                            e.preventDefault();
+                            e.stopPropagation();
+                            dragStartedRef.current = false;
+                            return;
+                          }
+                          
+                          // For multi-slot shapes, we might click on a path element
+                          // Try to find the shape type and cell info from the clicked element or its siblings
+                          let shapeType = target.getAttribute('data-shape-type') as ShapeType | null;
+                          let cellIndex = target.getAttribute('data-cell-index');
+                          let cellKey = target.getAttribute('data-cell-key');
+                          
+                          // If we don't have the data on the clicked element, try to find it from parent or siblings
+                          if (!shapeType || !cellIndex) {
+                            // Try to find a sibling or parent with the data
+                            const parent = target.parentElement;
+                            if (parent) {
+                              // Look for other elements in the same cell
+                              const allElements = parent.querySelectorAll('[data-shape-type]');
+                              for (const el of Array.from(allElements)) {
+                                const elShapeType = el.getAttribute('data-shape-type');
+                                const elCellIndex = el.getAttribute('data-cell-index');
+                                const elCellKey = el.getAttribute('data-cell-key');
+                                
+                                // If this element is at the same position, use its data
+                                if (elCellKey === cellKey || (elCellIndex === cellIndex && elCellIndex)) {
+                                  shapeType = elShapeType as ShapeType | null;
+                                  cellIndex = elCellIndex;
+                                  cellKey = elCellKey;
+                                  break;
+                                }
+                              }
+                            }
+                          }
+                          
+                          console.log('[Drag] Extracted data', { shapeType, cellIndex, cellKey });
+                          
+                          if (shapeType && cellIndex !== null) {
+                            // Find the cell key from row/col if not directly on element
+                            const finalCellKey = cellKey || (() => {
+                              const idx = parseInt(cellIndex, 10);
+                              const row = Math.floor(idx / config.gridSize);
+                              const col = idx % config.gridSize;
+                              return `${row}_${col}`;
+                            })();
+                            
+                            console.log('[Drag] Final cell key', { finalCellKey, isManualShape: config.manualShapes?.[finalCellKey] });
+                            
+                            // Always allow dragging shapes on the grid
+                            if (finalCellKey) {
+                              if (!e.dataTransfer) return;
+                              console.log('[Drag] Allowing drag, setting data transfer');
+                              e.dataTransfer.setData('text/plain', shapeType);
+                              e.dataTransfer.setData('application/x-cell-key', finalCellKey);
+                              e.dataTransfer.effectAllowed = 'move';
+                              setDraggedShape(shapeType);
+                              setIsDraggingFromGrid(true);
+                              setDraggedCellKey(finalCellKey);
+                              
+                              // Add visual feedback - make all elements in this cell semi-transparent
+                              const svg = target.closest('svg');
+                              if (svg) {
+                                const cellElements = svg.querySelectorAll(`[data-cell-key="${finalCellKey}"]`);
+                                cellElements.forEach((el: Element) => {
+                                  if (el instanceof SVGElement && el.hasAttribute('data-shape-type')) {
+                                    el.style.opacity = '0.5';
+                                    el.style.cursor = 'grabbing';
+                                  }
+                                });
+                              }
+                            } else {
+                              console.log('[Drag] Drag not allowed - no cell key');
+                              e.preventDefault();
+                              e.stopPropagation();
+                              dragStartedRef.current = false;
+                            }
+                          } else {
+                            console.log('[Drag] Missing required data', { shapeType, cellIndex });
+                            e.preventDefault();
+                            e.stopPropagation();
+                            dragStartedRef.current = false;
+                          }
+                        };
+                        
+                        // Add dragend to restore opacity
+                        const dragEndHandler = (e: DragEvent) => {
+                          console.log('[Drag] dragend event fired');
+                          const target = e.target as HTMLElement;
+                          
+                          // Restore opacity for all elements in the dragged cell
+                          const svg = target.closest('svg');
+                          if (svg && draggedCellKey) {
+                            const cellElements = svg.querySelectorAll(`[data-cell-key="${draggedCellKey}"]`);
+                            cellElements.forEach((el: Element) => {
+                              if (el instanceof SVGElement && el.hasAttribute('data-shape-type')) {
+                                el.style.opacity = '';
+                                el.style.cursor = '';
+                              }
+                            });
+                          } else if (target instanceof SVGElement) {
+                            target.style.opacity = '';
+                            target.style.cursor = '';
+                          }
+                          
+                          setDraggedShape(null);
+                          setDragOverCell(null);
+                          setIsDraggingFromGrid(false);
+                          setDraggedCellKey(null);
+                        };
+                        
+                        // Store handlers on element for reuse
+                        (el as any).__dragStartHandler = dragStartHandler;
+                        (el as any).__dragEndHandler = dragEndHandler;
+                        
+                        // Use capture phase to ensure we catch the event
+                        el.addEventListener('dragstart', dragStartHandler, true);
+                        el.addEventListener('dragend', dragEndHandler, true);
+                        
+                        // Also add data attribute to find this container later
+                        el.setAttribute('data-svg-container', 'true');
+                        
+                        // Also try attaching directly to SVG elements after a short delay
+                        setTimeout(() => {
+                          const svg = el.querySelector('svg');
+                          if (svg) {
+                            console.log('[PatternGenerator] Found SVG, checking draggable elements');
+                            const draggableElements = svg.querySelectorAll('[draggable="true"]');
+                            console.log('[PatternGenerator] Found', draggableElements.length, 'draggable elements');
+                            
+                            // Attach listeners directly to SVG elements as backup
+                            draggableElements.forEach((svgEl: Element) => {
+                              if (!(svgEl as any).__dragListenerAttached) {
+                                console.log('[PatternGenerator] Attaching drag listener to element', {
+                                  tagName: svgEl.tagName,
+                                  hasDataShapeType: svgEl.hasAttribute('data-shape-type'),
+                                  hasDataCellKey: svgEl.hasAttribute('data-cell-key')
+                                });
+                                svgEl.addEventListener('dragstart', dragStartHandler as EventListener, true);
+                                svgEl.addEventListener('dragend', dragEndHandler as EventListener, true);
+                                (svgEl as any).__dragListenerAttached = true;
+                                (svgEl as any).__dragStartHandler = dragStartHandler;
+                                (svgEl as any).__dragEndHandler = dragEndHandler;
+                              }
+                            });
+                          }
+                        }, 100);
                       }
                     }}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    onDragLeave={handleDragLeave}
                     className="w-full h-full"
                     style={{
                       width: '100%',
                       height: '100%',
                       position: 'relative',
-                      cursor: 'pointer'
+                      cursor: draggedShape ? 'copy' : 'pointer',
+                      pointerEvents: 'auto'
                     }}
                     dangerouslySetInnerHTML={{ 
                       __html: svgContent
                         .replace(/<svg([^>]*)\s+width="[^"]*"([^>]*)>/i, '<svg$1$2>')
                         .replace(/<svg([^>]*)\s+height="[^"]*"([^>]*)>/i, '<svg$1$2>')
-                        .replace(/<svg([^>]*)>/, '<svg$1 style="width: 100%; height: 100%; display: block;">')
+                        .replace(/<svg([^>]*)>/, '<svg$1 style="width: 100%; height: 100%; display: block; pointer-events: none;">')
                     }}
                   />
                 </div>
@@ -1033,14 +2289,54 @@ Randomize All
               )}
             </div>
           </div>
+          {/* Cell selection toolbar - appears at bottom when cells are selected */}
+          {selectedCells.size > 0 && (
+            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-50">
+              <div
+                className="bg-white rounded-lg shadow-lg border border-gray-200 p-3 pointer-events-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfig(prev => {
+                        const newManualShapes = { ...prev.manualShapes || {} };
+                        // Mark all selected cells as deleted
+                        selectedCells.forEach(cellKey => {
+                          newManualShapes[cellKey] = '__DELETED__' as any;
+                        });
+                        return {
+                          ...prev,
+                          manualShapes: newManualShapes
+                        };
+                      });
+                      setSelectedCells(new Set());
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-white bg-gray-600 rounded hover:bg-gray-700 transition-colors"
+                  >
+                    Delete {selectedCells.size > 1 ? `(${selectedCells.size})` : ''}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCells(new Set())}
+                    className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Toolbar absolutely positioned below pattern container */}
           {selectedShape && (
-            <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2">
+            <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-50">
               <div
                 className="shape-toolbar bg-white rounded-lg shadow-lg border border-gray-200 p-3 pointer-events-auto"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center gap-2">
+                  {/* TEMPORARILY DISABLED: Shuffle Colors button
                   <button
                     type="button"
                     onClick={() => {
@@ -1051,6 +2347,8 @@ Randomize All
                   >
                     Shuffle Colors
                   </button>
+                  */}
+                  {/* TEMPORARILY DISABLED: Cancel button
                   <button
                     type="button"
                     onClick={() => handleCancelShapeColors(selectedShape.shapeType)}
@@ -1058,6 +2356,35 @@ Randomize All
                   >
                     Cancel
                   </button>
+                  */}
+                  {selectedShape.cellIndex !== undefined && (() => {
+                    const cellIndex = selectedShape.cellIndex;
+                    const row = Math.floor(cellIndex / config.gridSize);
+                    const col = cellIndex % config.gridSize;
+                    const cellKey = `${row}_${col}`;
+                    // Show delete button for all shapes
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfig(prev => {
+                            const newManualShapes = { ...prev.manualShapes || {} };
+                            // Mark this cell as deleted by setting it to a sentinel value
+                            // This prevents regeneration while keeping the cell explicitly empty
+                            newManualShapes[cellKey] = '__DELETED__' as any;
+                            return {
+                              ...prev,
+                              manualShapes: newManualShapes
+                            };
+                          });
+                          setSelectedShape(null);
+                        }}
+                        className="px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 rounded hover:bg-red-100 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    );
+                  })()}
                   <button
                     type="button"
                     onClick={() => setSelectedShape(null)}
@@ -1331,3 +2658,4 @@ Export SVG
     </div>
   );
 }
+

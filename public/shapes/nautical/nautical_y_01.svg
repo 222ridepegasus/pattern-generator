@@ -1,10 +1,10 @@
 <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g id="shapes/nautical/nautical_y_01" clip-path="url(#clip0_2012_1919)">
-<rect id="slot_3" width="64" height="64" fill="#3A3A3A" style="fill:#3A3A3A;fill:color(display-p3 0.2275 0.2275 0.2275);fill-opacity:1;"/>
-<path id="slot_4" d="M64 25.6045L44.8018 44.8018L25.6045 64H12.9336L38.4658 38.4658L64 12.9336V25.6045ZM64 51.249L57.625 57.625L51.249 64H38.5781L51.2881 51.2881L64 38.5781V51.249ZM31.9795 31.9795L0 63.9609V51.2881L25.6445 25.6445L51.2881 0H63.9609L31.9795 31.9795ZM19.1582 19.1582L0 38.3154V25.6445L25.6445 0H38.3154L19.1582 19.1582ZM6.33594 6.33594L0 12.6709V0H12.6709L6.33594 6.33594Z" fill="#777777" style="fill:#777777;fill:color(display-p3 0.4667 0.4667 0.4667);fill-opacity:1;"/>
+<g id="shapes/nautical/nautical_y_01" clip-path="url(#clip0_2013_4420)">
+<rect id="slot_3" width="64" height="64" fill="black" style="fill:black;fill-opacity:1;"/>
+<path id="slot_4" d="M64 25.6045L44.8018 44.8018L25.6045 64H12.9336L38.4658 38.4658L64 12.9336V25.6045ZM64 51.249L57.625 57.625L51.249 64H38.5781L51.2881 51.2881L64 38.5781V51.249ZM31.9795 31.9795L0 63.9609V51.2881L25.6445 25.6445L51.2881 0H63.9609L31.9795 31.9795ZM19.1582 19.1582L0 38.3154V25.6445L25.6445 0H38.3154L19.1582 19.1582ZM6.33594 6.33594L0 12.6709V0H12.6709L6.33594 6.33594Z" fill="white" style="fill:white;fill-opacity:1;"/>
 </g>
 <defs>
-<clipPath id="clip0_2012_1919">
+<clipPath id="clip0_2013_4420">
 <rect width="64" height="64" fill="white" style="fill:white;fill-opacity:1;"/>
 </clipPath>
 </defs>

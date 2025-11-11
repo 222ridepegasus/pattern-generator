@@ -43,6 +43,8 @@ export interface PatternConfig {
     color: string;      // hex color
   };
   shapeColorOverrides?: Record<ShapeType, Record<number | string, string | number>>; // Maps shape type → slot number → color override (also stores _shuffleIndex)
+  manualShapes?: Record<string, ShapeType | '__DELETED__'>; // Maps "row_col" to shape type for manual placement, or '__DELETED__' to mark as deleted
+  placementMode?: 'random' | 'manual'; // Placement mode: random generation or manual drag-and-drop
 }
 
 
