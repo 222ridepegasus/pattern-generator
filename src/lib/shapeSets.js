@@ -9,7 +9,7 @@ export const shapeSets = {
       name: 'Primitives',
       description: 'Basic geometric shapes',
       icon: '○□△⬡',
-      enabled: false, // DISABLED
+      enabled: true,
       multiColor: false
     },
     shapes: {
@@ -45,7 +45,7 @@ export const shapeSets = {
       name: '3×3 Blocks',
       description: 'Complex block patterns',
       icon: '▦▧▨',
-      enabled: false, // DISABLED
+      enabled: true,
       multiColor: false
     },
     shapes: {
@@ -238,16 +238,6 @@ export const shapeSets = {
     const scaleY = scale * flipV;
     return [
       {
-        type: 'rect',
-        attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
-        },
-        slot: 1
-      },
-      {
         type: 'path',
         attrs: {
           d: "M64 64H0V48H64V64ZM64 16H0V0H64V16Z",
@@ -273,16 +263,6 @@ export const shapeSets = {
     const scaleX = scale * flipH;
     const scaleY = scale * flipV;
     return [
-      {
-        type: 'rect',
-        attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
-        },
-        slot: 1
-      },
       {
         type: 'rect',
         attrs: {
@@ -338,14 +318,12 @@ export const shapeSets = {
     const scaleY = scale * flipV;
     return [
       {
-        type: 'rect',
+        type: 'path',
         attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
+          d: "M21.3336 64H10.6666V0H21.3336V64ZM42.6666 64H32.0006V0H42.6666V64ZM63.9996 64H53.3336V0H63.9996V64Z",
+          transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
         },
-        slot: 1
+        slot: 2
       },
       {
         type: 'path',
@@ -354,14 +332,6 @@ export const shapeSets = {
           transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
         },
         slot: 4
-      },
-      {
-        type: 'path',
-        attrs: {
-          d: "M21.3335 64H10.6665V0H21.3335V64ZM42.6665 64H32.0005V0H42.6665V64ZM63.9995 64H53.3335V0H63.9995V64Z",
-          transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
-        },
-        slot: 2
       }
     ];
   },
@@ -399,16 +369,6 @@ export const shapeSets = {
     const scaleX = scale * flipH;
     const scaleY = scale * flipV;
     return [
-      {
-        type: 'rect',
-        attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
-        },
-        slot: 1
-      },
       {
         type: 'rect',
         attrs: {
@@ -465,16 +425,6 @@ export const shapeSets = {
       {
         type: 'rect',
         attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
-        },
-        slot: 1
-      },
-      {
-        type: 'rect',
-        attrs: {
           x: `${x + (32 - 32) * scaleX}`,
           y: `${y + (0 - 32) * scaleY}`,
           width: `${32 * Math.abs(scaleX)}`,
@@ -501,14 +451,12 @@ export const shapeSets = {
     const scaleY = scale * flipV;
     return [
       {
-        type: 'rect',
+        type: 'path',
         attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
+          d: "M64 64H32V32H64V64ZM32 32H0V0H32V32Z",
+          transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
         },
-        slot: 1
+        slot: 4
       },
       {
         type: 'path',
@@ -517,14 +465,6 @@ export const shapeSets = {
           transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
         },
         slot: 5
-      },
-      {
-        type: 'path',
-        attrs: {
-          d: "M64 64H32V32H64V64ZM32 32H0V0H32V32Z",
-          transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
-        },
-        slot: 4
       }
     ];
   },
@@ -587,14 +527,12 @@ export const shapeSets = {
     const scaleY = scale * flipV;
     return [
       {
-        type: 'rect',
+        type: 'path',
         attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
+          d: "M64 64L0 0H64V64Z",
+          transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
         },
-        slot: 1
+        slot: 3
       },
       {
         type: 'path',
@@ -603,14 +541,6 @@ export const shapeSets = {
           transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
         },
         slot: 4
-      },
-      {
-        type: 'path',
-        attrs: {
-          d: "M64 64L0 0H64V64Z",
-          transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
-        },
-        slot: 3
       }
     ];
   },
@@ -623,10 +553,10 @@ export const shapeSets = {
       {
         type: 'rect',
         attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
+          x: `${x + (4 - 32) * scaleX}`,
+          y: `${y + (4 - 32) * scaleY}`,
+          width: `${56 * Math.abs(scaleX)}`,
+          height: `${56 * Math.abs(scaleY)}`
         },
         slot: 1
       },
@@ -654,16 +584,6 @@ export const shapeSets = {
           width: `${64 * Math.abs(scaleX)}`,
           height: `${64 * Math.abs(scaleY)}`
         },
-        slot: 1
-      },
-      {
-        type: 'rect',
-        attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
-        },
         slot: 4
       }
     ];
@@ -674,16 +594,6 @@ export const shapeSets = {
     const scaleX = scale * flipH;
     const scaleY = scale * flipV;
     return [
-      {
-        type: 'rect',
-        attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
-        },
-        slot: 1
-      },
       {
         type: 'rect',
         attrs: {
@@ -743,20 +653,30 @@ export const shapeSets = {
         attrs: {
           x: `${x + (0 - 32) * scaleX}`,
           y: `${y + (0 - 32) * scaleY}`,
-          width: `${21 * Math.abs(scaleX)}`,
+          width: `${64 * Math.abs(scaleX)}`,
           height: `${64 * Math.abs(scaleY)}`
         },
-        slot: 3
+        slot: 1
       },
       {
         type: 'rect',
         attrs: {
-          x: `${x + (42.7002 - 32) * scaleX}`,
+          x: `${x + (42.7 - 32) * scaleX}`,
           y: `${y + (0 - 32) * scaleY}`,
           width: `${21.3 * Math.abs(scaleX)}`,
           height: `${64 * Math.abs(scaleY)}`
         },
         slot: 2
+      },
+      {
+        type: 'rect',
+        attrs: {
+          x: `${x + (0 - 32) * scaleX}`,
+          y: `${y + (0 - 32) * scaleY}`,
+          width: `${21 * Math.abs(scaleX)}`,
+          height: `${64 * Math.abs(scaleY)}`
+        },
+        slot: 3
       }
     ];
   },
@@ -792,6 +712,16 @@ export const shapeSets = {
     const scaleX = scale * flipH;
     const scaleY = scale * flipV;
     return [
+      {
+        type: 'rect',
+        attrs: {
+          x: `${x + (0 - 32) * scaleX}`,
+          y: `${y + (0 - 32) * scaleY}`,
+          width: `${64 * Math.abs(scaleX)}`,
+          height: `${64 * Math.abs(scaleY)}`
+        },
+        slot: 1
+      },
       {
         type: 'path',
         attrs: {
@@ -878,15 +808,15 @@ export const shapeSets = {
           width: `${64 * Math.abs(scaleX)}`,
           height: `${64 * Math.abs(scaleY)}`
         },
-        slot: 4
+        slot: 3
       },
       {
         type: 'path',
         attrs: {
-          d: "M64 25.6045L44.8018 44.8018L25.6045 64H12.9336L38.4658 38.4658L64 12.9336V25.6045ZM64 51.249L57.625 57.625L51.249 64H38.5781L51.2881 51.2881L64 38.5781V51.249ZM63.9609 0L31.9795 31.9795L0 63.9609V51.2881L25.6445 25.6445L51.2881 0H63.9609ZM19.1582 19.1582L0 38.3154V25.6445L25.6445 0H38.3154L19.1582 19.1582ZM6.33594 6.33594L0 12.6709V0H12.6709L6.33594 6.33594Z",
+          d: "M64 25.6045L44.8018 44.8018L25.6045 64H12.9336L38.4658 38.4658L64 12.9336V25.6045ZM64 51.249L57.625 57.625L51.249 64H38.5781L51.2881 51.2881L64 38.5781V51.249ZM31.9795 31.9795L0 63.9609V51.2881L25.6445 25.6445L51.2881 0H63.9609L31.9795 31.9795ZM19.1582 19.1582L0 38.3154V25.6445L25.6445 0H38.3154L19.1582 19.1582ZM6.33594 6.33594L0 12.6709V0H12.6709L6.33594 6.33594Z",
           transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
         },
-        slot: 3
+        slot: 4
       }
     ];
   },
@@ -897,30 +827,20 @@ export const shapeSets = {
     const scaleY = scale * flipV;
     return [
       {
-        type: 'rect',
-        attrs: {
-          x: `${x + (0 - 32) * scaleX}`,
-          y: `${y + (0 - 32) * scaleY}`,
-          width: `${64 * Math.abs(scaleX)}`,
-          height: `${64 * Math.abs(scaleY)}`
-        },
-        slot: 1
-      },
-      {
-        type: 'path',
-        attrs: {
-          d: "M0 0V64L32 32L0 0Z",
-          transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
-        },
-        slot: 5
-      },
-      {
         type: 'path',
         attrs: {
           d: "M64 0V64L32 32L64 0Z",
           transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
         },
         slot: 2
+      },
+      {
+        type: 'path',
+        attrs: {
+          d: "M64 64L0 64L32 32L64 64Z",
+          transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
+        },
+        slot: 3
       },
       {
         type: 'path',
@@ -933,10 +853,10 @@ export const shapeSets = {
       {
         type: 'path',
         attrs: {
-          d: "M64 64L0 64L32 32L64 64Z",
+          d: "M0 0V64L32 32L0 0Z",
           transform: `translate(${x}, ${y}) scale(${scaleX}, ${scaleY}) translate(-32, -32)`
         },
-        slot: 3
+        slot: 5
       }
     ];
   }

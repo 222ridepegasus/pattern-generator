@@ -5,11 +5,70 @@ interface ColorPickersProps {
   onColorsChange: (colors: string[]) => void;
 }
 
+// Helper function to normalize hex color input
+const normalizeHexColor = (value: string): string => {
+  // Remove any whitespace
+  value = value.trim();
+  // Remove # if present
+  value = value.replace(/^#/, '');
+  // Only allow hex characters (0-9, A-F, a-f)
+  value = value.replace(/[^0-9A-Fa-f]/g, '');
+  // Limit to 6 characters
+  value = value.slice(0, 6);
+  // Add # prefix
+  return value ? `#${value.toUpperCase()}` : '#';
+};
+
 export default function ColorPickers({ colors, onColorsChange }: ColorPickersProps) {
   const handleColorChange = (index: number, newColor: string) => {
     const updatedColors = [...colors];
     updatedColors[index] = newColor;
     onColorsChange(updatedColors);
+  };
+
+  // Handle hex input change - normalize while typing
+  const handleHexInputChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    index: number
+  ) => {
+    const value = e.target.value;
+    const normalized = normalizeHexColor(value);
+    // Allow typing - normalized will be # followed by 0-6 hex digits
+    handleColorChange(index, normalized);
+  };
+
+  // Handle hex input focus - select all text
+  const handleHexInputFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    // Use setTimeout to ensure selection happens after focus
+    setTimeout(() => {
+      e.target.select();
+    }, 0);
+  };
+
+  // Handle hex input paste - works with selected text
+  const handleHexInputPaste = (
+    e: React.ClipboardEvent<HTMLInputElement>,
+    index: number
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pastedText = e.clipboardData.getData('text');
+    const normalized = normalizeHexColor(pastedText);
+    // Accept any valid hex format (complete or partial)
+    // normalizeHexColor ensures it's properly formatted with #
+    if (normalized.length > 1) { // More than just '#'
+      handleColorChange(index, normalized);
+      // Select all after paste for easy replacement
+      // Use requestAnimationFrame to ensure DOM is updated
+      requestAnimationFrame(() => {
+        e.currentTarget.select();
+      });
+    }
+  };
+
+  // Handle hex input click - select all on click (works with focus)
+  const handleHexInputClick = (e: React.MouseEvent<HTMLInputElement>) => {
+    e.currentTarget.select();
   };
 
   const handleRemoveColor = (index: number) => {
@@ -42,13 +101,10 @@ export default function ColorPickers({ colors, onColorsChange }: ColorPickersPro
             <input
               type="text"
               value={color.toUpperCase()}
-              onChange={(e) => {
-                // Allow hex input
-                const value = e.target.value;
-                if (/^#[0-9A-Fa-f]{0,6}$/.test(value)) {
-                  handleColorChange(index, value);
-                }
-              }}
+              onChange={(e) => handleHexInputChange(e, index)}
+              onFocus={handleHexInputFocus}
+              onClick={handleHexInputClick}
+              onPaste={(e) => handleHexInputPaste(e, index)}
               className="w-full px-3 py-2 text-sm font-mono text-gray-600 bg-gray-50 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="#FFFFFF"
             />

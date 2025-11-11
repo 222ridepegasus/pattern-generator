@@ -42,6 +42,7 @@ export interface PatternConfig {
     width: number;      // 1-10
     color: string;      // hex color
   };
+  shapeColorOverrides?: Record<ShapeType, Record<number | string, string | number>>; // Maps shape type → slot number → color override (also stores _shuffleIndex)
 }
 
 

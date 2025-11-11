@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { DEFAULT_CONFIG, COLOR_PALETTES } from '../lib/types';
 import type { PatternConfig, ShapeType } from '../lib/types';
 import { generatePattern, patternToSVG } from '../lib/patternEngine';
-import { shapeSets } from '../lib/shapeSets.js';
+import { shapeSets, shapes } from '../lib/shapeSets.js';
 import ShapeSelector from './ShapeSelector';
 import ColorPickers from './ColorPickers';
 import PaletteSelector from './PaletteSelector';
@@ -11,9 +11,6 @@ import PaletteSelector from './PaletteSelector';
  * Generate a random config for page load
  */
 function generateRandomConfig(): PatternConfig {
-  // 1. Random background color (#fff or #000)
-  const backgroundColor = Math.random() > 0.5 ? '#ffffff' : '#000000';
-  
   // 2. Pick nautical shapes (primitives and blocks are disabled)
   const nauticalShapes: ShapeType[] = Object.keys(shapeSets.nautical.shapes) as ShapeType[];
   const numShapes = Math.floor(Math.random() * 10) + 5; // 5-14 shapes
@@ -25,6 +22,9 @@ function generateRandomConfig(): PatternConfig {
   const randomPaletteName = paletteNames[Math.floor(Math.random() * paletteNames.length)];
   const colors = [...COLOR_PALETTES[randomPaletteName as keyof typeof COLOR_PALETTES]];
   
+  // 1. Use slot_1 (first color) from selected theme as background color
+  const backgroundColor = colors[0] || '#ffffff';
+  
   // 4. Randomize mirroring: none, vertical, horizontal, or both
   const mirrorOptions = [
     { horizontal: false, vertical: false },
@@ -34,15 +34,15 @@ function generateRandomConfig(): PatternConfig {
   ];
   const mirror = mirrorOptions[Math.floor(Math.random() * mirrorOptions.length)];
   
-  // 5. Randomize grid size between 3×3 and 8×8
-  const gridSize = Math.floor(Math.random() * 6) + 3; // 3-8
+  // 5. Randomize grid size between 4×4 and 6×6
+  const gridSize = Math.floor(Math.random() * 3) + 4; // 4-6
   
-  // 6. Randomize border padding: 0, 16, 32, or 48
-  const borderPaddingOptions = [0, 16, 32, 48];
+  // 6. Randomize border padding: 16, 24, or 32
+  const borderPaddingOptions = [16, 24, 32];
   const borderPadding = borderPaddingOptions[Math.floor(Math.random() * borderPaddingOptions.length)];
   
-  // 7. Randomize line spacing: 0, 16, 32, 48, or 64
-  const lineSpacingOptions = [0, 16, 32, 48, 64];
+  // 7. Randomize line spacing: 16, 24, or 32
+  const lineSpacingOptions = [16, 24, 32];
   const lineSpacing = lineSpacingOptions[Math.floor(Math.random() * lineSpacingOptions.length)];
   
   return {
@@ -86,6 +86,8 @@ export default function PatternGenerator() {
   const [seedCopied, setSeedCopied] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  const [selectedShape, setSelectedShape] = useState<{shapeType: ShapeType, x: number, y: number, cellIndex?: number} | null>(null);
+  const [syncBackgroundColor, setSyncBackgroundColor] = useState(true); // Default to synced
   
   // Undo/Redo system
   const [history, setHistory] = useState<PatternConfig[]>([initialConfig]);
@@ -133,6 +135,54 @@ export default function PatternGenerator() {
       return newHistory;
     });
   }, [config]);
+
+  // Add CSS for selected shape highlighting - highlight cell containers, not shapes
+  useEffect(() => {
+    const styleId = 'shape-selection-style';
+    let styleElement = document.getElementById(styleId);
+    
+    if (!styleElement) {
+      styleElement = document.createElement('style');
+      styleElement.id = styleId;
+      document.head.appendChild(styleElement);
+    }
+    
+    if (selectedShape) {
+      // Show solid blue border only on the actually selected cell
+      // Add pulsing animation using opacity
+      const selectedCellIndex = selectedShape.cellIndex !== undefined ? selectedShape.cellIndex.toString() : '';
+      if (selectedCellIndex) {
+        styleElement.textContent = `
+          @keyframes pulseBorder {
+            0%, 100% {
+              stroke-opacity: 1;
+              opacity: 1;
+            }
+            50% {
+              stroke-opacity: 0.85;
+              opacity: 0.85;
+            }
+          }
+          svg [data-selected-shape="${selectedShape.shapeType}"][data-cell-index="${selectedCellIndex}"] {
+            display: block !important;
+            stroke: #3b82f6 !important;
+            stroke-width: 7px !important;
+            fill: none !important;
+            animation: pulseBorder 2s ease-in-out infinite !important;
+          }
+        `;
+      }
+    } else {
+      styleElement.textContent = '';
+    }
+    
+    return () => {
+      // Cleanup on unmount
+      if (styleElement && !selectedShape) {
+        styleElement.textContent = '';
+      }
+    };
+  }, [selectedShape]);
 
   // Regenerate pattern whenever config changes
   useEffect(() => {
@@ -229,13 +279,87 @@ export default function PatternGenerator() {
     }));
   };
 
-  // Handle background color change
+  // Helper function to normalize hex color input
+  const normalizeHexColor = (value: string): string => {
+    // Remove any whitespace
+    value = value.trim();
+    // Remove # if present
+    value = value.replace(/^#/, '');
+    // Only allow hex characters (0-9, A-F, a-f)
+    value = value.replace(/[^0-9A-Fa-f]/g, '');
+    
+    // Expand short hex codes
+    if (value.length === 1) {
+      // Single character: repeat 6 times (e.g., 'f' -> 'ffffff')
+      value = value.repeat(6);
+    } else if (value.length === 2) {
+      // Two characters: repeat 3 times (e.g., 'f1' -> 'f1f1f1')
+      value = value.repeat(3);
+    } else if (value.length === 3) {
+      // Three characters: expand each (e.g., 'fff' -> 'ffffff', 'f1a' -> 'ff11aa')
+      value = value.split('').map(c => c + c).join('');
+    }
+    
+    // Limit to 6 characters
+    value = value.slice(0, 6);
+    // Add # prefix
+    return value ? `#${value.toUpperCase()}` : '#';
+  };
+
+  // Handle background color change - disable sync when user manually changes
   const handleBackgroundColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newColor = e.target.value;
+    setSyncBackgroundColor(false); // Disable sync when user manually changes
     setConfig(prev => ({
       ...prev,
       backgroundColor: newColor,
     }));
+  };
+
+  // Handle hex input change - normalize while typing
+  const handleHexInputChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    setColor: (color: string) => void
+  ) => {
+    const value = e.target.value;
+    const normalized = normalizeHexColor(value);
+    // Allow typing - normalized will be # followed by 0-6 hex digits
+    // Always update to allow partial input while typing
+    setColor(normalized);
+  };
+
+  // Handle hex input focus - select all text
+  const handleHexInputFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    // Use setTimeout to ensure selection happens after focus
+    setTimeout(() => {
+      e.target.select();
+    }, 0);
+  };
+
+  // Handle hex input paste - works with selected text
+  const handleHexInputPaste = (
+    e: React.ClipboardEvent<HTMLInputElement>,
+    setColor: (color: string) => void
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pastedText = e.clipboardData.getData('text');
+    const normalized = normalizeHexColor(pastedText);
+    // Accept any valid hex format (complete or partial)
+    // normalizeHexColor ensures it's properly formatted with #
+    if (normalized.length > 1) { // More than just '#'
+      setColor(normalized);
+      // Select all after paste for easy replacement
+      // Use requestAnimationFrame to ensure DOM is updated
+      requestAnimationFrame(() => {
+        e.currentTarget.select();
+      });
+    }
+  };
+
+  // Handle hex input click - select all on click (works with focus)
+  const handleHexInputClick = (e: React.MouseEvent<HTMLInputElement>) => {
+    e.currentTarget.select();
   };
 
   // Handle shape selection change
@@ -246,13 +370,38 @@ export default function PatternGenerator() {
     }));
   };
 
-  // Handle colors change
+  // Handle colors change - update background to slot_1 when theme changes (only if sync is enabled)
   const handleColorsChange = (colors: string[]) => {
-    setConfig(prev => ({
-      ...prev,
-      colors: colors,
-    }));
+    setConfig(prev => {
+      const newConfig = {
+        ...prev,
+        colors: colors,
+        shapeColorOverrides: undefined, // Clear color overrides when theme changes
+      };
+      
+      // Only update background color if sync is enabled
+      if (syncBackgroundColor) {
+        newConfig.backgroundColor = colors[0] || prev.backgroundColor;
+      }
+      
+      return newConfig;
+    });
   };
+
+  // Sync background color when colors change and sync is enabled
+  useEffect(() => {
+    if (syncBackgroundColor && config.colors.length > 0) {
+      const themeBgColor = config.colors[0];
+      // Only update if different to avoid infinite loops
+      if (config.backgroundColor !== themeBgColor) {
+        setConfig(prev => ({
+          ...prev,
+          backgroundColor: themeBgColor
+        }));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncBackgroundColor, config.colors]); // Trigger when colors array reference changes
 
   // Convert HSL to hex
   const hslToHex = (h: number, s: number, l: number): string => {
@@ -372,8 +521,8 @@ export default function PatternGenerator() {
         const randomPaletteName = paletteNames[Math.floor(Math.random() * paletteNames.length)];
         const randomColors = [...COLOR_PALETTES[randomPaletteName as keyof typeof COLOR_PALETTES]];
         
-        // 3. Randomize background color: either #fff or #000
-        const randomBackgroundColor = Math.random() > 0.5 ? '#ffffff' : '#000000';
+        // 3. Use slot_1 from selected theme as background color
+        const randomBackgroundColor = randomColors[0] || '#ffffff';
         
         // 4. Randomize rotation: on or off
         const randomRotation = Math.random() > 0.5;
@@ -498,6 +647,97 @@ export default function PatternGenerator() {
       }));
       setSeedInput('');
     }
+  };
+
+  // Generate all permutations of colors for a given length
+  const generateColorPermutations = (colors: string[], length: number): string[][] => {
+    if (length === 0) return [[]];
+    if (length === 1) return colors.map(c => [c]);
+    
+    const permutations: string[][] = [];
+    
+    const generate = (current: string[], remaining: string[]) => {
+      if (current.length === length) {
+        permutations.push([...current]);
+        return;
+      }
+      
+      for (let i = 0; i < remaining.length; i++) {
+        current.push(remaining[i]);
+        generate(current, remaining);
+        current.pop();
+      }
+    };
+    
+    generate([], colors);
+    return permutations;
+  };
+
+  // Handle shuffle colors for a specific shape type - cycles through permutations
+  const handleShuffleShapeColors = (shapeType: ShapeType) => {
+    // Generate shape at dummy position to get its slots
+    const dummyShape = shapes[shapeType](0, 0, 100);
+    
+    if (!Array.isArray(dummyShape)) {
+      // Single-color shape - just use first color
+      setConfig(prev => ({
+        ...prev,
+        shapeColorOverrides: {
+          ...prev.shapeColorOverrides,
+          [shapeType]: { 1: prev.colors[0] }
+        }
+      }));
+      return;
+    }
+
+    // Get unique slots used by this shape
+    const usedSlots = [...new Set(dummyShape.map(el => el.slot || 1))].sort((a, b) => a - b);
+    const numSlots = usedSlots.length;
+    
+    // Generate all permutations of theme colors for the number of slots needed
+    const allPermutations = generateColorPermutations(config.colors, numSlots);
+    
+    if (allPermutations.length === 0) {
+      // Fallback if no permutations
+      return;
+    }
+    
+    // Get current shuffle index for this shape type (default to -1, so first shuffle is index 0)
+    const currentShuffleIndex = (config.shapeColorOverrides?.[shapeType]?._shuffleIndex as number | undefined) ?? -1;
+    
+    // Cycle to next permutation
+    const nextIndex = (currentShuffleIndex + 1) % allPermutations.length;
+    const selectedPermutation = allPermutations[nextIndex];
+    
+    // Create override mapping: slot number → color from permutation
+    const slotColorMap: Record<number, string> = {
+      _shuffleIndex: nextIndex // Store the index for next shuffle
+    };
+    usedSlots.forEach((slot, index) => {
+      slotColorMap[slot] = selectedPermutation[index % selectedPermutation.length];
+    });
+
+    // Update config with new color overrides
+    setConfig(prev => ({
+      ...prev,
+      shapeColorOverrides: {
+        ...prev.shapeColorOverrides,
+        [shapeType]: slotColorMap
+      }
+    }));
+  };
+
+  // Handle cancel/revert colors for a specific shape type
+  const handleCancelShapeColors = (shapeType: ShapeType) => {
+    setConfig(prev => {
+      const newOverrides = { ...prev.shapeColorOverrides };
+      delete newOverrides[shapeType];
+      return {
+        ...prev,
+        shapeColorOverrides: Object.keys(newOverrides).length > 0 ? newOverrides : undefined
+      };
+    });
+    setSelectedShape(null);
   };
 
 
@@ -675,13 +915,15 @@ Redo
           {/* Separator */}
           <div className="w-px h-8 bg-gray-300 mx-2"></div>
 
-          {/* Refresh Layout (only changes seed/layout) */}
+          {/* Refresh Layout (only changes seed/layout, preserves color overrides) */}
           <button
             type="button"
             onClick={() => {
               setConfig(prev => ({
                 ...prev,
-                seed: Date.now()
+                seed: Date.now(),
+                // Preserve shapeColorOverrides so colors don't change
+                shapeColorOverrides: prev.shapeColorOverrides
               }));
             }}
             className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200"
@@ -704,7 +946,7 @@ Randomize All
         </div>
 
         {/* CANVAS */}
-        <div className="flex-1 bg-gray-100 flex items-center justify-center p-8">
+        <div className="flex-1 bg-gray-100 flex items-center justify-center p-8 relative">
           {/* Keep existing canvas/pattern display here */}
           <div className="bg-gray-100 p-6 md:p-8 rounded-2xl w-full max-w-7xl flex items-center justify-center">
             <div
@@ -735,10 +977,46 @@ Randomize All
                   }}
                 >
                   <div
+                    ref={(el) => {
+                      if (el) {
+                        // Remove old listener if exists
+                        el.onclick = null;
+                        // Add click event delegation
+                        el.onclick = (e: MouseEvent) => {
+                          const target = e.target as HTMLElement;
+                          // Don't select if clicking on toolbar
+                          if (target.closest('.shape-toolbar')) {
+                            return;
+                          }
+                          const shapeType = target.getAttribute('data-shape-type') as ShapeType | null;
+                          const cellIndex = target.getAttribute('data-cell-index');
+                          if (shapeType) {
+                            // Get position relative to the container
+                            const rect = target.getBoundingClientRect();
+                            const containerRect = el.getBoundingClientRect();
+                            // Use center of the clicked element for toolbar positioning
+                            // Position toolbar near the shape (slightly above and to the right)
+                            const x = rect.left - containerRect.left + rect.width / 2;
+                            const y = rect.top - containerRect.top + rect.height / 2;
+                            setSelectedShape({
+                              shapeType,
+                              x,
+                              y,
+                              cellIndex: cellIndex ? parseInt(cellIndex, 10) : undefined
+                            });
+                          } else {
+                            // Click outside shape - close toolbar
+                            setSelectedShape(null);
+                          }
+                        };
+                      }
+                    }}
                     className="w-full h-full"
                     style={{
                       width: '100%',
                       height: '100%',
+                      position: 'relative',
+                      cursor: 'pointer'
                     }}
                     dangerouslySetInnerHTML={{ 
                       __html: svgContent
@@ -755,6 +1033,42 @@ Randomize All
               )}
             </div>
           </div>
+          {/* Toolbar absolutely positioned below pattern container */}
+          {selectedShape && (
+            <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2">
+              <div
+                className="shape-toolbar bg-white rounded-lg shadow-lg border border-gray-200 p-3 pointer-events-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleShuffleShapeColors(selectedShape.shapeType);
+                      // Keep toolbar open after shuffling
+                    }}
+                    className="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 rounded hover:bg-blue-100 transition-colors"
+                  >
+                    Shuffle Colors
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCancelShapeColors(selectedShape.shapeType)}
+                    className="px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 rounded hover:bg-red-100 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedShape(null)}
+                    className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-50 rounded hover:bg-gray-100 transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -781,19 +1095,49 @@ Randomize All
                   type="text"
                   value={config.backgroundColor.toUpperCase()}
                   onChange={(e) => {
-                    // Allow hex input
-                    const value = e.target.value;
-                    if (/^#[0-9A-Fa-f]{0,6}$/.test(value)) {
+                    handleHexInputChange(e, (color) => {
+                      setSyncBackgroundColor(false); // Disable sync when user types
                       setConfig(prev => ({
                         ...prev,
-                        backgroundColor: value
+                        backgroundColor: color
                       }));
-                    }
+                    });
+                  }}
+                  onFocus={handleHexInputFocus}
+                  onClick={handleHexInputClick}
+                  onPaste={(e) => {
+                    handleHexInputPaste(e, (color) => {
+                      setSyncBackgroundColor(false); // Disable sync when user pastes
+                      setConfig(prev => ({
+                        ...prev,
+                        backgroundColor: color
+                      }));
+                    });
                   }}
                   className="flex-1 px-3 py-2 text-sm font-mono text-gray-600 bg-gray-50 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="#FFFFFF"
                 />
               </div>
+              {/* Sync checkbox */}
+              <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={syncBackgroundColor}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setSyncBackgroundColor(checked);
+                    if (checked) {
+                      // Re-enable sync: reset to theme's slot_1 color
+                      setConfig(prev => ({
+                        ...prev,
+                        backgroundColor: prev.colors[0] || prev.backgroundColor
+                      }));
+                    }
+                  }}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                />
+                <span className="text-sm text-gray-700">Use theme BG color</span>
+              </label>
             </div>
 
             {/* Color Palettes */}
@@ -883,18 +1227,26 @@ Randomize Colors
                   <input
                     type="text"
                     value={(config.stroke?.color || '#000000').toUpperCase()}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (/^#[0-9A-Fa-f]{0,6}$/.test(value)) {
-                        setConfig(prev => ({
-                          ...prev,
-                          stroke: { 
-                            ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), 
-                            color: value 
-                          }
-                        }));
-                      }
-                    }}
+                    onChange={(e) => handleHexInputChange(e, (color) => {
+                      setConfig(prev => ({
+                        ...prev,
+                        stroke: { 
+                          ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), 
+                          color: color 
+                        }
+                      }));
+                    })}
+                    onFocus={handleHexInputFocus}
+                    onClick={handleHexInputClick}
+                    onPaste={(e) => handleHexInputPaste(e, (color) => {
+                      setConfig(prev => ({
+                        ...prev,
+                        stroke: { 
+                          ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), 
+                          color: color 
+                        }
+                      }));
+                    })}
                     className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="#000000"
                   />

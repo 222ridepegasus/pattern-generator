@@ -26,6 +26,47 @@ export class SeededRandom {
   }
 }
 
+/**
+ * Compress shape slots to fit within theme slot count
+ * Uses seed-driven offset for deterministic variation when compression is needed
+ * 
+ * @param {number[]} shapeSlots - Array of slot numbers used by shape (e.g., [1, 3, 5])
+ * @param {number} themeSlotCount - Number of slots in current theme
+ * @param {number} seed - Seed value for deterministic offset
+ * @returns {Object} - Mapping of original slots to new slots (e.g., {1: 1, 3: 2, 5: 3})
+ */
+function compressSlots(shapeSlots, themeSlotCount, seed) {
+  // Validation: themeSlotCount must be > 0
+  if (themeSlotCount === 0) {
+    throw new Error('themeSlotCount must be greater than 0');
+  }
+  
+  const uniqueSlots = [...new Set(shapeSlots)].sort((a, b) => a - b);
+  const mapping = {};
+  const maxSlot = Math.max(...uniqueSlots);
+  
+  // If all slots fit within theme (no slot number exceeds theme count), use direct mapping
+  // Example: shape uses [1, 2, 3], theme has 5 colors → keep as [1, 2, 3]
+  if (maxSlot <= themeSlotCount) {
+    uniqueSlots.forEach((originalSlot) => {
+      mapping[originalSlot] = originalSlot; // Direct 1:1 mapping
+    });
+    return mapping;
+  }
+  
+  // If shape uses slots beyond theme count, compress and add offset for variety
+  // Example: shape uses [1, 3, 5], theme has 2 colors → compress to [1, 2] with offset
+  const offset = seed % themeSlotCount;
+  
+  uniqueSlots.forEach((originalSlot, index) => {
+    const compressedSlot = index + 1;
+    const finalSlot = ((offset + compressedSlot - 1) % themeSlotCount) + 1;
+    mapping[originalSlot] = finalSlot;
+  });
+  
+  return mapping;
+}
+
 
 
 // Calculate pattern layout based on new system
@@ -153,44 +194,58 @@ export function generateCenteredGrid(config, rng) {
         ? shapes[shapeType](x, y, tileSize)
         : shapes[shapeType](x, y, tileSize, flipH, flipV);
 
-      // For single-color shapes, pick random color
-      // For multi-slot shapes, colors are assigned per-slot (no random pick needed)
+      // For single-color shapes, use first theme color consistently
+      // For multi-slot shapes, colors are assigned per-slot (no color pick needed)
       const isMultiSlot = Array.isArray(shapeResult);
-      const color = isMultiSlot ? null : rng.choice(colors);
+      const color = isMultiSlot ? null : colors[0];
 
       // Handle multi-slot shapes (arrays of paths)
       if (Array.isArray(shapeResult)) {
-        // Multi-slot shape (like nautical flags)
-        // NOTE: Transforms disabled for multi-slot shapes for now
-        shapeResult.forEach(pathElement => {
-          const slotNumber = pathElement.slot;
-          const colorIndex = slotNumber - 1;
-          
+        // Multi-slot shape with slot compression
+        // Extract all slot numbers used by this shape
+        const usedSlots = shapeResult.map(el => el.slot || 1);
+        
+        // Check if there's a color override for this shape type
+        const shapeOverrides = config.shapeColorOverrides?.[shapeType];
+        
+        shapeResult.forEach((pathElement, elementIndex) => {
+          const originalSlot = pathElement.slot || 1;
           let slotColor;
           
-          if (colorIndex < colors.length) {
-            slotColor = colors[colorIndex];
+          // Skip _shuffleIndex property
+          if (shapeOverrides && shapeOverrides[originalSlot] && originalSlot !== '_shuffleIndex') {
+            // Use override color directly
+            slotColor = shapeOverrides[originalSlot];
           } else {
-            // Fallback for 3-color themes
-            if (colors.length === 3) {
-              slotColor = colors[(colorIndex - 3) % 2 + 1];
-            } else {
-              slotColor = colors[colors.length - 1];
-            }
+            // Use normal slot compression logic
+            // Use shape type as seed for consistent colors (not affected by layout refresh)
+            // This ensures colors stay the same when refreshing layout
+            const colorSeed = shapeType.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            const slotMapping = compressSlots(usedSlots, colors.length, colorSeed);
+            const mappedSlot = slotMapping[originalSlot] || originalSlot;
+            slotColor = colors[mappedSlot - 1] || colors[0];
           }
           
-          // Create element with slot color - NO transforms applied
+          // Create element with mapped slot color
           const element = {
             type: pathElement.type,
-            attrs: pathElement.attrs,
-            fill: slotColor
+            attrs: {
+              ...pathElement.attrs,
+              // Add pointer-events and cursor for clickability
+              style: `${pathElement.attrs.style || ''}; cursor: pointer;`.trim()
+            },
+            fill: slotColor,
+            shapeType: shapeType, // Track which shape this element belongs to
+            cellIndex: row * gridSize + col // Track which cell this is in
           };
           
           elements.push(element);
         });
       } else {
-        // Single-color shape - use the random color we picked
+        // Single-color shape - use first theme color consistently
         shapeResult.fill = color;
+        shapeResult.shapeType = shapeType; // Track shape type
+        shapeResult.cellIndex = row * gridSize + col; // Track cell index
         
         if (rotation.enabled) {
           const rotationAngle = rng.range(0, 360);
@@ -263,6 +318,25 @@ export function generateCenteredGrid(config, rng) {
           }
         });
       }
+
+      // Add selection border rect for this cell (outside the cell, hidden by default)
+      // This will be shown via CSS when the shape type is selected
+      const cellIndex = row * gridSize + col;
+      elements.push({
+        type: 'rect',
+        attrs: {
+          x: x - tileSize / 2,
+          y: y - tileSize / 2,
+          width: tileSize,
+          height: tileSize,
+          fill: 'none',
+          stroke: '#3b82f6',
+          'stroke-width': 3,
+          'data-selected-shape': shapeType,
+          'data-cell-index': cellIndex,
+          style: 'display: none;' // Hidden by default, shown via CSS when selected
+        }
+      });
     }
   }
 
@@ -318,7 +392,7 @@ export const patternGenerators = {
         const y = Math.round(edgePadding + row * cellSize + actualShapeSize / 2);
         
         const shapeType = rng.choice(selectedShapes);
-        const color = rng.choice(colors);
+        const color = colors[0]; // Use first theme color consistently
         
         // Use actualShapeSize (scaled if needed)
         const element = shapes[shapeType](x, y, actualShapeSize);
@@ -420,7 +494,7 @@ export const patternGenerators = {
         if (x > edgePadding + innerWidth || y > edgePadding + innerHeight) continue;
         
         const shapeType = rng.choice(selectedShapes);
-        const color = rng.choice(colors);
+        const color = colors[0]; // Use first theme color consistently
         
         // Use actualShapeSize (scaled if needed)
         const element = shapes[shapeType](x, y, actualShapeSize);
@@ -502,14 +576,42 @@ export function patternToSVG(elements, canvasSize, backgroundColor) {
   const [width, height] = canvasSize;
   
   const svgElements = elements.map(el => {
-    const attrs = Object.entries(el.attrs)
+    // Separate style from other attrs
+    const styleValue = el.attrs?.style;
+    const attrsWithoutStyle = { ...el.attrs };
+    if (styleValue) {
+      delete attrsWithoutStyle.style;
+    }
+    
+    const attrs = Object.entries(attrsWithoutStyle)
       .map(([key, value]) => `${key}="${String(value)}"`)
       .join(' ');
     
     const fill = el.fill ? `fill="${el.fill}"` : '';
     const transform = el.transform ? `transform="${el.transform}"` : '';
+    const style = styleValue ? `style="${styleValue}"` : '';
     
-    return `<${el.type} ${attrs} ${fill} ${transform} />`;
+    // Add data attributes for click detection
+    const dataAttrs = [];
+    if (el.shapeType) {
+      dataAttrs.push(`data-shape-type="${el.shapeType}"`);
+    }
+    if (el.cellIndex !== undefined) {
+      dataAttrs.push(`data-cell-index="${el.cellIndex}"`);
+    }
+    // Handle selection border rects
+    if (el.attrs && el.attrs['data-selected-shape']) {
+      dataAttrs.push(`data-selected-shape="${el.attrs['data-selected-shape']}"`);
+    }
+    if (el.attrs && el.attrs['data-cell-index'] !== undefined && !el.cellIndex) {
+      dataAttrs.push(`data-cell-index="${el.attrs['data-cell-index']}"`);
+    }
+    const dataAttrString = dataAttrs.length > 0 ? ' ' + dataAttrs.join(' ') : '';
+    
+    // Add class for styling
+    const classAttr = el.shapeType ? ` class="shape-element"` : '';
+    
+    return `<${el.type} ${attrs} ${fill} ${transform}${classAttr} ${style}${dataAttrString} />`;
   }).join('\n  ');
 
   // Ensure backgroundColor is a valid color string
