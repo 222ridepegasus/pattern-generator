@@ -3,6 +3,10 @@
  * Loads 2-color SVG shapes and applies theme colors
  */
 
+// SVG cache: stores original SVG content (before color replacement)
+// Key: shapeId, Value: original SVG string
+const svgCache = new Map();
+
 /**
  * Load an SVG file and replace colors
  * @param {string} shapeId - Shape identifier (e.g., 'nautical_a_01')
@@ -11,48 +15,63 @@
  * @returns {Promise<string>} - SVG content with colors replaced
  */
 export async function loadShapeWithColors(shapeId, bgColor, fgColor) {
-    // Determine shape category from ID
-    let category = 'nautical';
-    if (shapeId.startsWith('circle_') || shapeId.startsWith('square_') || shapeId.startsWith('triangle_')) {
-      category = 'primitives';
-    } else if (shapeId.startsWith('block33_')) {
-      category = 'blocks33';
+    // Check cache first
+    let svgContent = svgCache.get(shapeId);
+    
+    if (!svgContent) {
+        // Not in cache, fetch from server
+        // Determine shape category from ID
+        let category = 'nautical';
+        if (shapeId.startsWith('circle_') || shapeId.startsWith('square_') || shapeId.startsWith('triangle_')) {
+          category = 'primitives';
+        } else if (shapeId.startsWith('block33_')) {
+          category = 'blocks33';
+        }
+        
+        // Load SVG file
+        const svgPath = `/shapes/${category}/${shapeId}.svg`;
+        console.log(`[loadShapeWithColors] Loading SVG from: ${svgPath}`);
+        const response = await fetch(svgPath);
+        
+        if (!response.ok) {
+          console.error(`[loadShapeWithColors] Failed to load shape: ${shapeId}`, {
+            status: response.status,
+            statusText: response.statusText,
+            path: svgPath
+          });
+          throw new Error(`Failed to load shape: ${shapeId} (${response.status} ${response.statusText})`);
+        }
+        
+        // Cache the original SVG content (before color replacement)
+        svgContent = await response.text();
+        svgCache.set(shapeId, svgContent);
+        console.log(`[loadShapeWithColors] Cached SVG for: ${shapeId}`);
+    } else {
+        console.log(`[loadShapeWithColors] Using cached SVG for: ${shapeId}`);
     }
     
-    // Load SVG file
-    const svgPath = `/shapes/${category}/${shapeId}.svg`;
-    console.log(`[loadShapeWithColors] Loading SVG from: ${svgPath}`);
-    const response = await fetch(svgPath);
-    
-    if (!response.ok) {
-      console.error(`[loadShapeWithColors] Failed to load shape: ${shapeId}`, {
-        status: response.status,
-        statusText: response.statusText,
-        path: svgPath
-      });
-      throw new Error(`Failed to load shape: ${shapeId} (${response.status} ${response.statusText})`);
-    }
-    
-    let svgContent = await response.text();
+    // Create a copy of the cached SVG content for color replacement
+    // (don't modify the cached version)
+    let coloredSvg = svgContent;
     
     // Replace template colors with theme colors
     // Replace white/light colors with background color
-    svgContent = svgContent.replace(/fill="#[fF]{6}"/g, `fill="${bgColor}"`);
-    svgContent = svgContent.replace(/fill="#[fF]{3}"/g, `fill="${bgColor}"`);
-    svgContent = svgContent.replace(/fill="white"/gi, `fill="${bgColor}"`);
+    coloredSvg = coloredSvg.replace(/fill="#[fF]{6}"/g, `fill="${bgColor}"`);
+    coloredSvg = coloredSvg.replace(/fill="#[fF]{3}"/g, `fill="${bgColor}"`);
+    coloredSvg = coloredSvg.replace(/fill="white"/gi, `fill="${bgColor}"`);
     // Also replace style attributes
-    svgContent = svgContent.replace(/style="fill:white([^"]*)"/gi, `style="fill:${bgColor}$1"`);
-    svgContent = svgContent.replace(/style='fill:white([^']*)'/gi, `style='fill:${bgColor}$1'`);
+    coloredSvg = coloredSvg.replace(/style="fill:white([^"]*)"/gi, `style="fill:${bgColor}$1"`);
+    coloredSvg = coloredSvg.replace(/style='fill:white([^']*)'/gi, `style='fill:${bgColor}$1'`);
     
     // Replace black/dark colors with foreground color
-    svgContent = svgContent.replace(/fill="#000000"/g, `fill="${fgColor}"`);
-    svgContent = svgContent.replace(/fill="#000"/g, `fill="${fgColor}"`);
-    svgContent = svgContent.replace(/fill="black"/gi, `fill="${fgColor}"`);
+    coloredSvg = coloredSvg.replace(/fill="#000000"/g, `fill="${fgColor}"`);
+    coloredSvg = coloredSvg.replace(/fill="#000"/g, `fill="${fgColor}"`);
+    coloredSvg = coloredSvg.replace(/fill="black"/gi, `fill="${fgColor}"`);
     // Also replace style attributes
-    svgContent = svgContent.replace(/style="fill:black([^"]*)"/gi, `style="fill:${fgColor}$1"`);
-    svgContent = svgContent.replace(/style='fill:black([^']*)'/gi, `style='fill:${fgColor}$1'`);
+    coloredSvg = coloredSvg.replace(/style="fill:black([^"]*)"/gi, `style="fill:${fgColor}$1"`);
+    coloredSvg = coloredSvg.replace(/style='fill:black([^']*)'/gi, `style='fill:${fgColor}$1'`);
     
-    return svgContent;
+    return coloredSvg;
   }
   
   /**
