@@ -9,46 +9,6 @@ interface ShapeSelectorProps {
   onClearGrid?: () => void; // Callback to clear the grid
 }
 
-// Render shape preview as mini SVG
-const renderShapePreview = (shapeName: ShapeType, shapeFunction: Function) => {
-  // Generate shape at center of 64x64 canvas, size 32px
-  const shapeData = shapeFunction(32, 32, 32);
-  
-  // Convert to SVG element
-  const attrs = Object.entries(shapeData.attrs)
-    .map(([key, val]) => `${key}="${val}"`)
-    .join(' ');
-  
-  const svgContent = `<${shapeData.type} ${attrs} fill="currentColor" />`;
-  
-  return (
-    <svg 
-      viewBox="0 0 64 64" 
-      className="w-full h-full"
-      dangerouslySetInnerHTML={{ __html: svgContent }}
-    />
-  );
-};
-
-// Simple preview component that renders a shape preview
-// NOTE: Primitives and blocks are disabled, only nautical shapes are used
-const ShapePreview: React.FC<{ shapeName: ShapeType }> = ({ shapeName }) => {
-  // Only nautical shapes are enabled now
-  const shapeFn = shapeName in shapeSets.nautical.shapes
-    ? shapeSets.nautical.shapes[shapeName as keyof typeof shapeSets.nautical.shapes]
-    : null;
-  
-  if (!shapeFn) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
-        {shapeName}
-      </div>
-    );
-  }
-
-  return renderShapePreview(shapeName, shapeFn);
-};
-
 // Nautical icon component that loads SVG and swaps colors when selected
 const NauticalIcon: React.FC<{ shapeKey: string; isSelected: boolean }> = ({ shapeKey, isSelected }) => {
   const [svgContent, setSvgContent] = React.useState<string>('');
@@ -129,8 +89,6 @@ export default function ShapeSelector({ selectedShapes, onSelectionChange, shape
 
   // Get shape names from availableShapes
   const nauticalShapes: ShapeType[] = availableShapes.nautical as ShapeType[];
-  
-  const allSelected = selectedShapes.length === nauticalShapes.length;
   const handleSelectAll = () => {
     // Select all shapes
     onSelectionChange([...nauticalShapes]);

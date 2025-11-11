@@ -1,4 +1,3 @@
-import React from 'react';
 import { COLOR_PALETTES } from '../lib/types';
 
 interface PaletteSelectorProps {
