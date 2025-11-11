@@ -112,6 +112,11 @@ export default function PatternGenerator() {
   const randomPatternSeedRef = useRef<number | null>(null); // Track seed used for cached pattern
   const randomPatternConfigRef = useRef<string>(''); // Track config hash for cached pattern
   const configRef = useRef<PatternConfig>(config); // Store latest config for event handlers
+  const [cellTransforms, setCellTransforms] = useState<Record<string, { rotation: number, flipH: boolean, flipV: boolean }>>({}); // Per-cell transforms: rotation (degrees), flipH, flipV
+  const [clipboard, setClipboard] = useState<{
+    shapes: Array<{ cellKey: string, shapeType: ShapeType | '__DELETED__' | null, transform?: { rotation: number, flipH: boolean, flipV: boolean } }>;
+    isCut: boolean;
+  } | null>(null); // Clipboard for copy/cut/paste
   
   // Keep configRef in sync
   useEffect(() => {
@@ -519,6 +524,105 @@ export default function PatternGenerator() {
     };
   }, [swapAnimation, svgContent, config.containerSize, config.borderPadding, config.lineSpacing, config.gridSize]);
 
+  // Apply rotation and flip transforms to selected cells
+  useEffect(() => {
+    if (!svgContent) return;
+
+    const svg = document.querySelector('[data-svg-container] svg');
+    if (!svg) return;
+
+    console.log('[Transform] Applying transforms to', Object.keys(cellTransforms).length, 'cells');
+
+    // Apply transforms to each cell
+    Object.entries(cellTransforms).forEach(([cellKey, transform]) => {
+      const groups = svg.querySelectorAll(`[data-cell-key="${cellKey}"]`);
+      console.log(`[Transform] Cell ${cellKey}: found ${groups.length} groups, transform:`, transform);
+      
+      groups.forEach((group: Element) => {
+        const g = group as SVGGElement;
+        
+        // Check if this group is already wrapped
+        let wrapper: SVGGElement | null = g.parentElement as SVGGElement | null;
+        const isWrapped = wrapper && wrapper.hasAttribute('data-transform-wrapper');
+        
+        if (!isWrapped) {
+          // Wrap the group in a new group for transforms
+          wrapper = document.createElementNS('http://www.w3.org/2000/svg', 'g') as SVGGElement;
+          wrapper.setAttribute('data-transform-wrapper', cellKey);
+          
+          // Get the original transform to extract tile center
+          const originalTransform = g.getAttribute('transform') || '';
+          g.setAttribute('data-original-transform', originalTransform);
+          
+          // Parse tile center from transform: translate(tileCenterX, tileCenterY) ...
+          const translateMatch = originalTransform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+          if (!translateMatch) {
+            console.warn('[Transform] Could not parse transform:', originalTransform);
+            return;
+          }
+          
+          const tileCenterX = parseFloat(translateMatch[1]);
+          const tileCenterY = parseFloat(translateMatch[2]);
+          
+          // Insert wrapper before the group
+          const parent = g.parentNode;
+          if (parent) {
+            parent.insertBefore(wrapper, g);
+            // Move group into wrapper
+            wrapper.appendChild(g);
+          }
+          
+          console.log(`[Transform] Wrapped group for ${cellKey}, tile center:`, tileCenterX, tileCenterY);
+        }
+        
+        if (!wrapper) return;
+        
+        // Now apply rotation/flip to the wrapper
+        const wrapperG = wrapper as SVGGElement;
+        const originalTransform = g.getAttribute('data-original-transform') || '';
+        const translateMatch = originalTransform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+        if (!translateMatch) return;
+        
+        const tileCenterX = parseFloat(translateMatch[1]);
+        const tileCenterY = parseFloat(translateMatch[2]);
+        
+        // Build transform for wrapper: rotate/flip around tile center
+        let wrapperTransform = '';
+        
+        if (transform.rotation !== 0) {
+          wrapperTransform += `rotate(${transform.rotation} ${tileCenterX} ${tileCenterY}) `;
+        }
+        
+        if (transform.flipH) {
+          wrapperTransform += `translate(${tileCenterX}, ${tileCenterY}) scale(-1, 1) translate(${-tileCenterX}, ${-tileCenterY}) `;
+        }
+        
+        if (transform.flipV) {
+          wrapperTransform += `translate(${tileCenterX}, ${tileCenterY}) scale(1, -1) translate(${-tileCenterX}, ${-tileCenterY}) `;
+        }
+        
+        wrapperG.setAttribute('transform', wrapperTransform.trim() || 'none');
+        console.log(`[Transform] Applied wrapper transform for ${cellKey}:`, wrapperTransform);
+      });
+    });
+
+    // Clean up wrappers for cells that no longer have transforms
+    const allWrappers = svg.querySelectorAll('[data-transform-wrapper]');
+    allWrappers.forEach((wrapper: Element) => {
+      const w = wrapper as SVGGElement;
+      const cellKey = w.getAttribute('data-transform-wrapper');
+      if (cellKey && !cellTransforms[cellKey]) {
+        // Unwrap: move the inner group back to parent, remove wrapper
+        const innerGroup = w.querySelector('[data-cell-key]') as SVGGElement;
+        if (innerGroup) {
+          w.parentNode?.insertBefore(innerGroup, w);
+          w.remove();
+          console.log(`[Transform] Removed wrapper for ${cellKey}`);
+        }
+      }
+    });
+  }, [cellTransforms, svgContent]);
+
   // Regenerate pattern whenever config changes
   useEffect(() => {
     let cancelled = false;
@@ -907,25 +1011,54 @@ export default function PatternGenerator() {
             manualShapes: newManualShapes
           };
         });
+        // Remove transforms for deleted cells
+        setCellTransforms(prev => {
+          const newTransforms = { ...prev };
+          selectedCells.forEach(cellKey => {
+            delete newTransforms[cellKey];
+          });
+          return newTransforms;
+        });
         setSelectedCells(new Set());
         return;
       }
 
-      // Arrow keys: Move selected cell(s)
-      if (selectedCells.size > 0 && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      // ESC: Close popups and clear selections
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        // Close selectedShape toolbar
+        if (selectedShape) {
+          setSelectedShape(null);
+        }
+        // Clear selectedCells
+        if (selectedCells.size > 0) {
+          setSelectedCells(new Set());
+        }
+        // Close sidebar if open (mobile)
+        if (sidebarOpen) {
+          setSidebarOpen(false);
+        }
+        return;
+      }
+
+      // W/A/S/D or Arrow keys: Move selected cell(s)
+      if (selectedCells.size > 0 && (
+        e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' ||
+        e.key === 'w' || e.key === 'W' || e.key === 's' || e.key === 'S' || e.key === 'a' || e.key === 'A' || e.key === 'd' || e.key === 'D'
+      )) {
         e.preventDefault();
         const currentConfig = configRef.current;
         
         // Calculate direction
         let deltaRow = 0;
         let deltaCol = 0;
-        if (e.key === 'ArrowUp') {
+        if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
           deltaRow = -1;
-        } else if (e.key === 'ArrowDown') {
+        } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
           deltaRow = 1;
-        } else if (e.key === 'ArrowLeft') {
+        } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
           deltaCol = -1;
-        } else if (e.key === 'ArrowRight') {
+        } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
           deltaCol = 1;
         }
         
@@ -1027,6 +1160,81 @@ export default function PatternGenerator() {
         const newSelectedCells = new Set(Array.from(selectedCells).map(oldKey => cellMoves.get(oldKey) || oldKey));
         setSelectedCells(newSelectedCells);
         
+        // Swap transforms for moved cells
+        setCellTransforms(prev => {
+          const newTransforms = { ...prev };
+          
+          // Get all transform values before swapping
+          const transformValues = new Map<string, { rotation: number, flipH: boolean, flipV: boolean } | undefined>();
+          for (const [oldKey, newKey] of cellMoves.entries()) {
+            transformValues.set(oldKey, newTransforms[oldKey]);
+            transformValues.set(newKey, newTransforms[newKey]);
+          }
+          
+          // Perform swaps
+          for (const [oldKey, newKey] of cellMoves.entries()) {
+            const oldTransform = transformValues.get(oldKey);
+            const newTransform = transformValues.get(newKey);
+            
+            if (oldTransform) {
+              newTransforms[newKey] = oldTransform;
+            } else {
+              delete newTransforms[newKey];
+            }
+            
+            if (newTransform) {
+              newTransforms[oldKey] = newTransform;
+            } else {
+              delete newTransforms[oldKey];
+            }
+          }
+          
+          return newTransforms;
+        });
+        
+        return;
+      }
+
+      // Q/E: Rotate selected cell(s) 90 degrees left/right
+      if (selectedCells.size > 0 && (e.key === 'q' || e.key === 'Q' || e.key === 'e' || e.key === 'E')) {
+        e.preventDefault();
+        setCellTransforms(prev => {
+          const newTransforms = { ...prev };
+          const rotationDelta = (e.key === 'q' || e.key === 'Q') ? -90 : 90;
+          
+          selectedCells.forEach(cellKey => {
+            const current = newTransforms[cellKey] || { rotation: 0, flipH: false, flipV: false };
+            const newRotation = (current.rotation + rotationDelta) % 360;
+            newTransforms[cellKey] = {
+              ...current,
+              rotation: newRotation < 0 ? newRotation + 360 : newRotation
+            };
+          });
+          
+          return newTransforms;
+        });
+        return;
+      }
+
+      // O/P: Flip selected cell(s) horizontally/vertically
+      if (selectedCells.size > 0 && (e.key === 'o' || e.key === 'O' || e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        setCellTransforms(prev => {
+          const newTransforms = { ...prev };
+          const flipH = e.key === 'o' || e.key === 'O';
+          const flipV = e.key === 'p' || e.key === 'P';
+          
+          selectedCells.forEach(cellKey => {
+            const current = newTransforms[cellKey] || { rotation: 0, flipH: false, flipV: false };
+            newTransforms[cellKey] = {
+              ...current,
+              flipH: flipH ? !current.flipH : current.flipH,
+              flipV: flipV ? !current.flipV : current.flipV
+            };
+          });
+          
+          return newTransforms;
+        });
         return;
       }
 
@@ -1062,11 +1270,213 @@ export default function PatternGenerator() {
         }
         return;
       }
+
+      // Copy: CMD+C (Mac) or CTRL+C (PC)
+      if (e.key === 'c' && selectedCells.size > 0) {
+        e.preventDefault();
+        const currentConfig = configRef.current;
+        const shapes: Array<{ cellKey: string, shapeType: ShapeType | '__DELETED__' | null, transform?: { rotation: number, flipH: boolean, flipV: boolean } }> = [];
+        
+        selectedCells.forEach(cellKey => {
+          // Get shape type from manualShapes or randomPattern
+          let shapeType: ShapeType | '__DELETED__' | null = currentConfig.manualShapes?.[cellKey] || null;
+          if (shapeType === null) {
+            const randomShape = randomPatternRef.current.get(cellKey);
+            if (randomShape) {
+              shapeType = randomShape as ShapeType;
+            }
+          }
+          
+          // Get transform if it exists
+          const transform = cellTransforms[cellKey];
+          
+          shapes.push({
+            cellKey,
+            shapeType,
+            transform: transform ? { ...transform } : undefined
+          });
+        });
+        
+        setClipboard({ shapes, isCut: false });
+        console.log('[Clipboard] Copied', shapes.length, 'shapes');
+        return;
+      }
+
+      // Cut: CMD+X (Mac) or CTRL+X (PC)
+      if (e.key === 'x' && selectedCells.size > 0) {
+        e.preventDefault();
+        const currentConfig = configRef.current;
+        const shapes: Array<{ cellKey: string, shapeType: ShapeType | '__DELETED__' | null, transform?: { rotation: number, flipH: boolean, flipV: boolean } }> = [];
+        
+        selectedCells.forEach(cellKey => {
+          // Get shape type from manualShapes or randomPattern
+          let shapeType: ShapeType | '__DELETED__' | null = currentConfig.manualShapes?.[cellKey] || null;
+          if (shapeType === null) {
+            const randomShape = randomPatternRef.current.get(cellKey);
+            if (randomShape) {
+              shapeType = randomShape as ShapeType;
+            }
+          }
+          
+          // Get transform if it exists
+          const transform = cellTransforms[cellKey];
+          
+          shapes.push({
+            cellKey,
+            shapeType,
+            transform: transform ? { ...transform } : undefined
+          });
+        });
+        
+        setClipboard({ shapes, isCut: true });
+        console.log('[Clipboard] Cut', shapes.length, 'shapes');
+        
+        // Delete the cut shapes
+        setConfig(prev => {
+          const newManualShapes = { ...prev.manualShapes || {} };
+          selectedCells.forEach(cellKey => {
+            newManualShapes[cellKey] = '__DELETED__' as any;
+          });
+          return {
+            ...prev,
+            manualShapes: newManualShapes
+          };
+        });
+        
+        // Remove transforms for cut cells
+        setCellTransforms(prev => {
+          const newTransforms = { ...prev };
+          selectedCells.forEach(cellKey => {
+            delete newTransforms[cellKey];
+          });
+          return newTransforms;
+        });
+        
+        setSelectedCells(new Set());
+        return;
+      }
+
+      // Paste: CMD+V (Mac) or CTRL+V (PC)
+      if (e.key === 'v' && clipboard && clipboard.shapes.length > 0 && selectedCells.size > 0) {
+        e.preventDefault();
+        const currentConfig = configRef.current;
+        const selectedCellsArray = Array.from(selectedCells);
+        let shapesToPaste = clipboard.shapes;
+        
+        // For single selection, paste all shapes relative to the first copied shape
+        // For multiple selection, paste each shape to corresponding selected cell (if same count)
+        if (selectedCells.size === 1 && clipboard.shapes.length > 1) {
+          // Single cell selected, multiple shapes in clipboard: paste relative to first shape
+          const targetCellKey = selectedCellsArray[0];
+          const [targetRow, targetCol] = targetCellKey.split('_').map(Number);
+          
+          // Find the top-left cell in clipboard (minimum row and col)
+          let minRow = Infinity;
+          let minCol = Infinity;
+          clipboard.shapes.forEach(({ cellKey }) => {
+            const [row, col] = cellKey.split('_').map(Number);
+            minRow = Math.min(minRow, row);
+            minCol = Math.min(minCol, col);
+          });
+          
+          // Calculate offset
+          const offsetRow = targetRow - minRow;
+          const offsetCol = targetCol - minCol;
+          
+          setConfig(prev => {
+            const newManualShapes = { ...prev.manualShapes || {} };
+            
+            clipboard.shapes.forEach(({ cellKey, shapeType }) => {
+              if (shapeType && shapeType !== '__DELETED__') {
+                const [row, col] = cellKey.split('_').map(Number);
+                const newRow = row + offsetRow;
+                const newCol = col + offsetCol;
+                
+                // Check bounds
+                if (newRow >= 0 && newRow < currentConfig.gridSize && newCol >= 0 && newCol < currentConfig.gridSize) {
+                  const newCellKey = `${newRow}_${newCol}`;
+                  newManualShapes[newCellKey] = shapeType;
+                }
+              }
+            });
+            
+            return {
+              ...prev,
+              manualShapes: newManualShapes
+            };
+          });
+          
+          // Copy transforms with offset
+          setCellTransforms(prev => {
+            const newTransforms = { ...prev };
+            
+            clipboard.shapes.forEach(({ cellKey, transform }) => {
+              if (transform) {
+                const [row, col] = cellKey.split('_').map(Number);
+                const newRow = row + offsetRow;
+                const newCol = col + offsetCol;
+                
+                if (newRow >= 0 && newRow < currentConfig.gridSize && newCol >= 0 && newCol < currentConfig.gridSize) {
+                  const newCellKey = `${newRow}_${newCol}`;
+                  newTransforms[newCellKey] = transform;
+                }
+              }
+            });
+            
+            return newTransforms;
+          });
+        } else {
+          // Paste each shape to corresponding selected cell (1:1 mapping)
+          shapesToPaste = clipboard.shapes.slice(0, selectedCells.size);
+          
+          setConfig(prev => {
+            const newManualShapes = { ...prev.manualShapes || {} };
+            
+            shapesToPaste.forEach(({ shapeType }, index) => {
+              const targetCellKey = selectedCellsArray[index];
+              if (shapeType && shapeType !== '__DELETED__') {
+                newManualShapes[targetCellKey] = shapeType;
+              } else if (shapeType === '__DELETED__') {
+                newManualShapes[targetCellKey] = '__DELETED__' as any;
+              } else {
+                delete newManualShapes[targetCellKey];
+              }
+            });
+            
+            return {
+              ...prev,
+              manualShapes: newManualShapes
+            };
+          });
+          
+          // Copy transforms
+          setCellTransforms(prev => {
+            const newTransforms = { ...prev };
+            
+            shapesToPaste.forEach(({ transform }, index) => {
+              if (transform) {
+                const targetCellKey = selectedCellsArray[index];
+                newTransforms[targetCellKey] = transform;
+              }
+            });
+            
+            return newTransforms;
+          });
+        }
+        
+        // Clear clipboard if it was a cut operation
+        if (clipboard.isCut) {
+          setClipboard(null);
+        }
+        
+        console.log('[Clipboard] Pasted', shapesToPaste.length, 'shapes');
+        return;
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [historyIndex, history, selectedCells]); // Dependencies for undo/redo state and selectedCells
+  }, [historyIndex, history, selectedCells, cellTransforms, clipboard, selectedShape, sidebarOpen]); // Dependencies for undo/redo state, selectedCells, cellTransforms, clipboard, selectedShape, and sidebarOpen
 
   // Calculate preview dimensions that fit within viewport
   // Container is fixed at 800×800px (1:1)
@@ -1770,7 +2180,21 @@ export default function PatternGenerator() {
       return;
     }
 
-    const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+    // Get the actual SVG from the DOM (includes transforms applied via wrapper groups)
+    const svgElement = document.querySelector('[data-svg-container] svg') as SVGSVGElement | null;
+    
+    let svgString = svgContent; // Fallback to original
+    
+    if (svgElement) {
+      // Clone the SVG to avoid modifying the original
+      const clonedSvg = svgElement.cloneNode(true) as SVGSVGElement;
+      
+      // Serialize to string
+      const serializer = new XMLSerializer();
+      svgString = serializer.serializeToString(clonedSvg);
+    }
+
+    const blob = new Blob([svgString], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -1794,9 +2218,26 @@ export default function PatternGenerator() {
     }
 
     try {
-      await navigator.clipboard.writeText(svgContent);
-      setExportMessage('SVG copied to clipboard!');
-      setTimeout(() => setExportMessage(null), 2000);
+      // Get the actual SVG from the DOM (includes transforms applied via wrapper groups)
+      const svgElement = document.querySelector('[data-svg-container] svg') as SVGSVGElement | null;
+      
+      if (svgElement) {
+        // Clone the SVG to avoid modifying the original
+        const clonedSvg = svgElement.cloneNode(true) as SVGSVGElement;
+        
+        // Serialize to string
+        const serializer = new XMLSerializer();
+        const svgString = serializer.serializeToString(clonedSvg);
+        
+        await navigator.clipboard.writeText(svgString);
+        setExportMessage('SVG copied to clipboard!');
+        setTimeout(() => setExportMessage(null), 2000);
+      } else {
+        // Fallback to svgContent if DOM element not found
+        await navigator.clipboard.writeText(svgContent);
+        setExportMessage('SVG copied to clipboard!');
+        setTimeout(() => setExportMessage(null), 2000);
+      }
     } catch (err) {
       setExportMessage('Failed to copy to clipboard');
       setTimeout(() => setExportMessage(null), 2000);
@@ -2621,6 +3062,14 @@ Randomize All
                           ...prev,
                           manualShapes: newManualShapes
                         };
+                      });
+                      // Remove transforms for deleted cells
+                      setCellTransforms(prev => {
+                        const newTransforms = { ...prev };
+                        selectedCells.forEach(cellKey => {
+                          delete newTransforms[cellKey];
+                        });
+                        return newTransforms;
                       });
                       setSelectedCells(new Set());
                     }}
