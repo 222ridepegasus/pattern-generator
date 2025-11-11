@@ -95,6 +95,16 @@ export default function PatternGenerator() {
   const [swapAnimation, setSwapAnimation] = useState<Array<{from: string, to: string}> | null>(null); // Track swap animations
   const [isDraggingFromGrid, setIsDraggingFromGrid] = useState(false);
   const [draggedCellKey, setDraggedCellKey] = useState<string | null>(null);
+  const [marqueeSelection, setMarqueeSelection] = useState<{
+    start: {x: number, y: number} | null;
+    end: {x: number, y: number} | null;
+    active: boolean;
+  }>({ start: null, end: null, active: false });
+  const marqueeSelectionRef = useRef<{
+    start: {x: number, y: number} | null;
+    end: {x: number, y: number} | null;
+    active: boolean;
+  }>({ start: null, end: null, active: false });
   const dragStartedRef = useRef(false); // Track if dragstart fired to prevent click selection
   const occupiedCellsRef = useRef<Set<string>>(new Set()); // Track which cells have shapes
   const [shapesInPattern, setShapesInPattern] = useState<Set<ShapeType>>(new Set()); // Track which shapes are in the current pattern
@@ -107,6 +117,11 @@ export default function PatternGenerator() {
   useEffect(() => {
     configRef.current = config;
   }, [config]);
+
+  // Keep marqueeSelectionRef in sync
+  useEffect(() => {
+    marqueeSelectionRef.current = marqueeSelection;
+  }, [marqueeSelection]);
   
   // Undo/Redo system
   const [history, setHistory] = useState<PatternConfig[]>([initialConfig]);
@@ -363,6 +378,76 @@ export default function PatternGenerator() {
       }
     };
   }, [selectedCells, svgContent, config.containerSize, config.borderPadding, config.lineSpacing, config.gridSize]);
+
+  // Draw marquee selection overlay on canvas (outside SVG so it's visible everywhere)
+  useEffect(() => {
+    if (!marqueeSelection.active || !marqueeSelection.start || !marqueeSelection.end) {
+      // Cleanup marquee overlay
+      const overlay = document.querySelector('[data-marquee-canvas-overlay]');
+      if (overlay) overlay.remove();
+      return;
+    }
+
+    // Find the canvas container
+    const canvasContainer = document.querySelector('[data-canvas-container]') as HTMLElement;
+    if (!canvasContainer) return;
+    
+    // Get SVG element to convert coordinates
+    const svgElement = canvasContainer.querySelector('[data-svg-container] svg') as SVGSVGElement | null;
+    if (!svgElement) return;
+
+    const svgRect = svgElement.getBoundingClientRect();
+    const canvasRect = canvasContainer.getBoundingClientRect();
+    const svgViewBox = svgElement.viewBox.baseVal;
+    const svgWidth = svgRect.width;
+    const svgHeight = svgRect.height;
+    
+    // Convert SVG viewBox coordinates to screen coordinates
+    const startX = marqueeSelection.start.x;
+    const startY = marqueeSelection.start.y;
+    const endX = marqueeSelection.end.x;
+    const endY = marqueeSelection.end.y;
+    
+    // Convert from SVG viewBox space to screen pixel space
+    const startScreenX = svgRect.left + (startX / svgViewBox.width) * svgWidth;
+    const startScreenY = svgRect.top + (startY / svgViewBox.height) * svgHeight;
+    const endScreenX = svgRect.left + (endX / svgViewBox.width) * svgWidth;
+    const endScreenY = svgRect.top + (endY / svgViewBox.height) * svgHeight;
+    
+    // Normalize rectangle
+    const x = Math.min(startScreenX, endScreenX);
+    const y = Math.min(startScreenY, endScreenY);
+    const width = Math.abs(endScreenX - startScreenX);
+    const height = Math.abs(endScreenY - startScreenY);
+    
+    // Convert to coordinates relative to canvas container
+    const relativeX = x - canvasRect.left;
+    const relativeY = y - canvasRect.top;
+
+    // Remove existing marquee overlay
+    const existingOverlay = canvasContainer.querySelector('[data-marquee-canvas-overlay]');
+    if (existingOverlay) existingOverlay.remove();
+
+    // Create marquee overlay div positioned absolutely over canvas
+    const marqueeOverlay = document.createElement('div');
+    marqueeOverlay.setAttribute('data-marquee-canvas-overlay', 'true');
+    marqueeOverlay.style.position = 'absolute';
+    marqueeOverlay.style.left = `${relativeX}px`;
+    marqueeOverlay.style.top = `${relativeY}px`;
+    marqueeOverlay.style.width = `${width}px`;
+    marqueeOverlay.style.height = `${height}px`;
+    marqueeOverlay.style.border = '2px dashed #3b82f6'; // blue-600
+    marqueeOverlay.style.backgroundColor = 'rgba(59, 130, 246, 0.1)'; // blue-600 with opacity
+    marqueeOverlay.style.pointerEvents = 'none';
+    marqueeOverlay.style.zIndex = '10';
+    
+    canvasContainer.appendChild(marqueeOverlay);
+
+    return () => {
+      const overlay = document.querySelector('[data-marquee-canvas-overlay]');
+      if (overlay) overlay.remove();
+    };
+  }, [marqueeSelection]);
 
   // Add swap animation CSS and apply transforms
   useEffect(() => {
@@ -1492,6 +1577,53 @@ export default function PatternGenerator() {
     }
   }, []); // Empty deps - uses configRef.current
 
+  // Get all cells that intersect with a marquee rectangle (in SVG coordinates)
+  const getCellsInMarquee = useCallback((startX: number, startY: number, endX: number, endY: number): Set<string> => {
+    const cells = new Set<string>();
+    try {
+      const currentConfig = configRef.current;
+      const layout = calculatePatternLayout({
+        containerSize: currentConfig.containerSize,
+        borderPadding: currentConfig.borderPadding,
+        lineSpacing: currentConfig.lineSpacing,
+        gridSize: currentConfig.gridSize,
+      });
+      
+      const { tileSize, offsetX, offsetY } = layout;
+      const cellWidth = tileSize + currentConfig.lineSpacing;
+      const cellHeight = tileSize + currentConfig.lineSpacing;
+      
+      // Normalize rectangle coordinates
+      const minX = Math.min(startX, endX);
+      const maxX = Math.max(startX, endX);
+      const minY = Math.min(startY, endY);
+      const maxY = Math.max(startY, endY);
+      
+      // Find all cells that intersect with the marquee
+      for (let row = 0; row < currentConfig.gridSize; row++) {
+        for (let col = 0; col < currentConfig.gridSize; col++) {
+          const cellX = offsetX + (col * cellWidth);
+          const cellY = offsetY + (row * cellHeight);
+          const cellRight = cellX + tileSize;
+          const cellBottom = cellY + tileSize;
+          
+          // Check if marquee intersects with this cell
+          if (maxX >= cellX && minX <= cellRight && maxY >= cellY && minY <= cellBottom) {
+            cells.add(`${row}_${col}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[PatternGenerator] Error in getCellsInMarquee:', err);
+    }
+    return cells;
+  }, []); // Empty deps - uses configRef.current
+  
+  const getCellsInMarqueeRef = useRef(getCellsInMarquee);
+  useEffect(() => {
+    getCellsInMarqueeRef.current = getCellsInMarquee;
+  }, [getCellsInMarquee]);
+
   // Handle drag over grid
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1902,7 +2034,185 @@ Randomize All
         </div>
 
         {/* CANVAS */}
-        <div className="flex-1 bg-gray-100 flex items-center justify-center p-8 relative">
+        <div 
+          className="flex-1 bg-gray-100 flex items-center justify-center p-8 relative"
+          data-canvas-container="true"
+          ref={(canvasEl) => {
+            if (canvasEl) {
+              // Only set up once - check if already initialized
+              if ((canvasEl as any).__marqueeListenersInitialized) {
+                return;
+              }
+              
+              (canvasEl as any).__marqueeListenersInitialized = true;
+              
+              // Track mouse down position to distinguish clicks from drags
+              let mouseDownPos: {x: number, y: number} | null = null;
+              let isDragging = false;
+              let mouseDownTime = 0;
+              let isMarqueeActive = false;
+              
+              const handleMouseDown = (e: MouseEvent) => {
+                const target = e.target as HTMLElement;
+                if (target.closest('.shape-toolbar')) {
+                  return;
+                }
+                // Reset drag flag
+                dragStartedRef.current = false;
+                // Don't interfere with draggable elements - let dragstart handle it
+                if (target.hasAttribute('draggable') || target.closest('[draggable="true"]')) {
+                  // Store mouse down position but don't prevent drag
+                  mouseDownPos = { x: e.clientX, y: e.clientY };
+                  mouseDownTime = Date.now();
+                  isDragging = false;
+                  // Don't prevent default - allow drag to start
+                  return;
+                }
+                
+                // Store mouse down position (will start marquee only if mouse moves)
+                mouseDownPos = { x: e.clientX, y: e.clientY };
+                mouseDownTime = Date.now();
+                isDragging = false;
+                isMarqueeActive = false; // Reset marquee state
+              };
+              
+              const handleMouseMove = (e: MouseEvent) => {
+                // If mouse moved more than 5px, start marquee (if not already active)
+                if (mouseDownPos && !isMarqueeActive) {
+                  const dx = Math.abs(e.clientX - mouseDownPos.x);
+                  const dy = Math.abs(e.clientY - mouseDownPos.y);
+                  if (dx > 5 || dy > 5) {
+                    // Start marquee selection
+                    isDragging = true;
+                    isMarqueeActive = true;
+                    
+                    const svgElement = canvasEl.querySelector('[data-svg-container] svg') as SVGSVGElement | null;
+                    if (svgElement && mouseDownPos) {
+                      const svgRect = svgElement.getBoundingClientRect();
+                      const svgViewBox = svgElement.viewBox.baseVal;
+                      const svgWidth = svgRect.width;
+                      const svgHeight = svgRect.height;
+                      
+                      // Convert initial mouse down position to SVG coordinates
+                      const initialMouseX = mouseDownPos.x - svgRect.left;
+                      const initialMouseY = mouseDownPos.y - svgRect.top;
+                      const startX = (initialMouseX / svgWidth) * svgViewBox.width;
+                      const startY = (initialMouseY / svgHeight) * svgViewBox.height;
+                      
+                      // Convert current mouse position to SVG coordinates
+                      const mouseX = e.clientX - svgRect.left;
+                      const mouseY = e.clientY - svgRect.top;
+                      const endX = (mouseX / svgWidth) * svgViewBox.width;
+                      const endY = (mouseY / svgHeight) * svgViewBox.height;
+                      
+                      setMarqueeSelection({
+                        start: { x: startX, y: startY },
+                        end: { x: endX, y: endY },
+                        active: true
+                      });
+                    }
+                    e.preventDefault();
+                    return;
+                  }
+                }
+                
+                // Update marquee if active
+                if (isMarqueeActive) {
+                  const svgElement = canvasEl.querySelector('[data-svg-container] svg') as SVGSVGElement | null;
+                  if (svgElement) {
+                    const svgRect = svgElement.getBoundingClientRect();
+                    const svgViewBox = svgElement.viewBox.baseVal;
+                    const svgWidth = svgRect.width;
+                    const svgHeight = svgRect.height;
+                    
+                    // Convert mouse coordinates to SVG coordinates
+                    // Can be outside SVG bounds (negative or > viewBox)
+                    const mouseX = e.clientX - svgRect.left;
+                    const mouseY = e.clientY - svgRect.top;
+                    
+                    // Scale to SVG viewBox coordinates (can be outside viewBox)
+                    const x = (mouseX / svgWidth) * svgViewBox.width;
+                    const y = (mouseY / svgHeight) * svgViewBox.height;
+                    
+                    setMarqueeSelection(prev => {
+                      if (!prev.start) return prev;
+                      return {
+                        ...prev,
+                        end: { x, y }
+                      };
+                    });
+                  }
+                  e.preventDefault(); // Prevent default drag behavior
+                  return; // Don't process as regular drag
+                }
+              };
+              
+              const handleMouseUp = (e: MouseEvent) => {
+                if (isMarqueeActive) {
+                  // Finish marquee selection - use ref to get latest state
+                  const currentMarquee = marqueeSelectionRef.current;
+                  if (currentMarquee.start && currentMarquee.end) {
+                    const svgElement = canvasEl.querySelector('[data-svg-container] svg');
+                    if (svgElement) {
+                      const cellsInMarquee = getCellsInMarqueeRef.current(
+                        currentMarquee.start.x,
+                        currentMarquee.start.y,
+                        currentMarquee.end.x,
+                        currentMarquee.end.y
+                      );
+                      
+                      // Select all cells in marquee
+                      if (e.shiftKey) {
+                        // SHIFT: Add to existing selection
+                        setSelectedCells(prevCells => {
+                          const newSelection = new Set(prevCells);
+                          cellsInMarquee.forEach(cellKey => newSelection.add(cellKey));
+                          return newSelection;
+                        });
+                      } else {
+                        // Regular: Replace selection
+                        setSelectedCells(cellsInMarquee);
+                      }
+                    }
+                  }
+                  
+                  // Clear marquee
+                  isMarqueeActive = false;
+                  setMarqueeSelection({ start: null, end: null, active: false });
+                  mouseDownPos = null;
+                  isDragging = false;
+                  return;
+                }
+                
+                mouseDownPos = null;
+                isDragging = false;
+              };
+              
+              const handleMouseLeave = (e: MouseEvent) => {
+                // Cancel marquee if mouse leaves canvas
+                if (isMarqueeActive) {
+                  isMarqueeActive = false;
+                  setMarqueeSelection({ start: null, end: null, active: false });
+                  mouseDownPos = null;
+                  isDragging = false;
+                }
+              };
+              
+              canvasEl.addEventListener('mousedown', handleMouseDown);
+              canvasEl.addEventListener('mousemove', handleMouseMove);
+              canvasEl.addEventListener('mouseup', handleMouseUp);
+              canvasEl.addEventListener('mouseleave', handleMouseLeave);
+              
+              // Store handlers for cleanup
+              (canvasEl as any).__marqueeHandlers = {
+                mousedown: handleMouseDown,
+                mousemove: handleMouseMove,
+                mouseup: handleMouseUp,
+                mouseleave: handleMouseLeave
+              };
+            }
+          }}
+        >
           {/* Keep existing canvas/pattern display here */}
           <div className="bg-gray-100 p-6 md:p-8 rounded-2xl w-full max-w-7xl flex items-center justify-center">
             <div
@@ -1980,7 +2290,8 @@ Randomize All
                             // Don't prevent default - allow drag to start
                             return;
                           }
-                          // Store mouse down position
+                          
+                          // Store mouse down position (for click detection, not marquee)
                           mouseDownPos = { x: e.clientX, y: e.clientY };
                           mouseDownTime = Date.now();
                           isDragging = false;
@@ -2278,7 +2589,7 @@ Randomize All
                       __html: svgContent
                         .replace(/<svg([^>]*)\s+width="[^"]*"([^>]*)>/i, '<svg$1$2>')
                         .replace(/<svg([^>]*)\s+height="[^"]*"([^>]*)>/i, '<svg$1$2>')
-                        .replace(/<svg([^>]*)>/, '<svg$1 style="width: 100%; height: 100%; display: block; pointer-events: none;">')
+                        .replace(/<svg([^>]*)>/, '<svg$1 style="width: 100%; height: 100%; display: block; pointer-events: none; overflow: visible;">')
                     }}
                   />
                 </div>
