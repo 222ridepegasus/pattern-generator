@@ -123,6 +123,14 @@ export default function PatternGenerator() {
   const randomPatternRef = useRef<Map<string, string>>(new Map()); // Cache random pattern: cellKey -> shapeId
   const randomPatternSeedRef = useRef<number | null>(null); // Track seed used for cached pattern
   const randomPatternConfigRef = useRef<string>(''); // Track config hash for cached pattern
+  const [patternCells, setPatternCells] = useState<Record<string, {
+    shapeId: string;
+    rotation: number;
+    flipH: boolean;
+    flipV: boolean;
+    bgColorIndex: number;
+    fgColorIndex: number;
+  } | null>>({});
   const configRef = useRef<PatternConfig>(config); // Store latest config for event handlers
   const [cellTransforms, setCellTransforms] = useState<Record<string, { rotation: number, flipH: boolean, flipV: boolean }>>({}); // Per-cell transforms: rotation (degrees), flipH, flipV
   const [clipboard, setClipboard] = useState<{
@@ -748,6 +756,16 @@ export default function PatternGenerator() {
           randomPatternSeedRef.current !== config.seed ||
           randomPatternConfigRef.current !== configHash;
         
+        // Build patternCells object (single source of truth)
+        const patternCellsData: Record<string, {
+          shapeId: string;
+          rotation: number;
+          flipH: boolean;
+          flipV: boolean;
+          bgColorIndex: number;
+          fgColorIndex: number;
+        } | null> = {};
+        
         if (shouldRegenerateRandom) {
           // Generate and cache random pattern
           randomPatternRef.current.clear();
@@ -759,63 +777,68 @@ export default function PatternGenerator() {
               
               // Skip if emptySpace says to leave empty
               if (config.emptySpace > 0 && tempRng.next() * 100 < config.emptySpace) {
-                continue; // Don't cache empty cells
+                patternCellsData[cellKey] = null; // Explicitly mark as empty
+                continue; // Don't cache empty cells in randomPatternRef
               }
               
               // Pick random shape from selected shapes
               const shapeId = tempRng.choice(config.shapes);
               randomPatternRef.current.set(cellKey, shapeId);
+              
+              // Add to patternCells data
+              patternCellsData[cellKey] = {
+                shapeId,
+                rotation: 0,
+                flipH: false,
+                flipV: false,
+                bgColorIndex: 0,
+                fgColorIndex: 1,
+              };
             }
           }
           
           randomPatternSeedRef.current = config.seed || Date.now();
           randomPatternConfigRef.current = configHash;
+        } else {
+          // Use existing patternCells if not regenerating
+          // Copy from current state (this handles subsequent renders)
+          Object.assign(patternCellsData, patternCells);
         }
         
-        // First, generate random pattern for all cells
-        // Use a Map to track which cells have shapes (for easy override)
+        // Build cells array for rendering directly from patternCellsData
+        // This avoids waiting for React state to update
         const cellMap = new Map<string, {row: number, col: number, shapeId: string, bgColorIndex: number, fgColorIndex: number}>();
         
         for (let row = 0; row < gridSize; row++) {
           for (let col = 0; col < gridSize; col++) {
             const cellKey = `${row}_${col}`;
             
-            // Check if this cell is manually placed or deleted
-            const manualShape = config.manualShapes?.[cellKey];
+            // Get cell from patternCellsData (direct, not from state)
+            const cell = patternCellsData[cellKey];
             
-            if (manualShape === '__DELETED__') {
-              // Skip deleted cells
+            // If cell is null or undefined, it's empty - skip it
+            if (!cell) {
               continue;
             }
             
-            if (manualShape) {
-              // Use manual shape (overrides random) - TypeScript knows it's ShapeType here
-              cellMap.set(cellKey, {
-                row,
-                col,
-                shapeId: manualShape,
-                bgColorIndex: 0,
-                fgColorIndex: 1,
-              });
-            } else {
-              // Use cached random pattern
-              const randomShapeId = randomPatternRef.current.get(cellKey);
-              if (randomShapeId) {
-                cellMap.set(cellKey, {
-                  row,
-                  col,
-                  shapeId: randomShapeId,
-                  bgColorIndex: 0,
-                  fgColorIndex: 1,
-                });
-              }
-              // If not in cache (empty cell), skip it
-            }
+            // Cell has a shape - add it to the map
+            cellMap.set(cellKey, {
+              row,
+              col,
+              shapeId: cell.shapeId,
+              bgColorIndex: cell.bgColorIndex,
+              fgColorIndex: cell.fgColorIndex,
+            });
           }
         }
         
-        // Convert map to array
+        // Update state for next render (async, happens later)
+        setPatternCells(patternCellsData);
+        console.log('[DEBUG] patternCells updated with', Object.keys(patternCellsData).length, 'cells');
+        
+        // Convert map to array for generatePattern
         cells.push(...Array.from(cellMap.values()));
+        console.log('[DEBUG] Rendering', cells.length, 'cells from patternCellsData (direct, not from state)');
         
         // Store occupied cells for drag-over detection
         occupiedCellsRef.current = new Set(cellMap.keys());
