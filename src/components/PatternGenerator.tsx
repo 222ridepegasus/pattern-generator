@@ -87,6 +87,18 @@ export default function PatternGenerator() {
   const [seedCopied, setSeedCopied] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  const [darkMode, setDarkMode] = useState(() => {
+    // Initialize from localStorage or system preference
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('darkMode');
+      if (saved !== null) {
+        return saved === 'true';
+      }
+      // Check system preference
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
   const [selectedShape, setSelectedShape] = useState<{shapeType: ShapeType, x: number, y: number, cellIndex?: number} | null>(null);
   const [syncBackgroundColor, setSyncBackgroundColor] = useState(true); // Default to synced
   const [draggedShape, setDraggedShape] = useState<ShapeType | null>(null);
@@ -127,6 +139,58 @@ export default function PatternGenerator() {
   useEffect(() => {
     marqueeSelectionRef.current = marqueeSelection;
   }, [marqueeSelection]);
+  
+  // Handle dark mode toggle
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      document.body.classList.add('dark');
+      localStorage.setItem('darkMode', 'true');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.body.classList.remove('dark');
+      localStorage.setItem('darkMode', 'false');
+    }
+  }, [darkMode]);
+  
+  // Initialize dark mode on mount (sync with script in Layout.astro)
+  useEffect(() => {
+    const saved = localStorage.getItem('darkMode');
+    const shouldBeDark = saved === 'true' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    if (shouldBeDark !== darkMode) {
+      setDarkMode(shouldBeDark);
+    }
+  }, []);
+  
+  // Handle clicks outside canvas to deselect
+  useEffect(() => {
+    const handleDocumentClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      
+      // Don't clear if clicking on toolbar
+      if (target.closest('.shape-toolbar')) {
+        return;
+      }
+      
+      // Check if click is outside the canvas container
+      const canvasContainer = document.querySelector('[data-canvas-container="true"]');
+      if (canvasContainer && !canvasContainer.contains(target)) {
+        // Click is outside canvas - clear selections
+        // But don't clear if clicking in sidebar areas (they're outside canvas but shouldn't deselect)
+        const isInSidebar = target.closest('.bg-gray-50.border-r') || target.closest('.bg-gray-50.border-l') ||
+                           target.closest('.dark\\:bg-gray-800.border-r') || target.closest('.dark\\:bg-gray-800.border-l');
+        if (!isInSidebar) {
+          setSelectedShape(null);
+          setSelectedCells(new Set());
+        }
+      }
+    };
+    
+    document.addEventListener('click', handleDocumentClick);
+    return () => {
+      document.removeEventListener('click', handleDocumentClick);
+    };
+  }, []);
   
   // Undo/Redo system
   const [history, setHistory] = useState<PatternConfig[]>([initialConfig]);
@@ -2246,14 +2310,14 @@ export default function PatternGenerator() {
   };
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen dark:bg-gray-900">
       {/* LEFT SIDEBAR */}
-      <div className="w-[300px] bg-gray-50 border-r border-gray-200 overflow-y-auto">
+      <div className="w-[300px] bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 overflow-y-auto">
         <div className="p-4 space-y-6">
           {/* PATTERN CONTROLS - Sliders */}
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Grid Size: {config.gridSize}×{config.gridSize}
               </label>
               <input
@@ -2266,18 +2330,20 @@ export default function PatternGenerator() {
                   ...prev, 
                   gridSize: parseInt(e.target.value) 
                 }))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
+                className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
                 style={{
-                  background: `linear-gradient(to right, #2563eb 0%, #2563eb ${((config.gridSize - 2) / 6) * 100}%, #e5e7eb ${((config.gridSize - 2) / 6) * 100}%, #e5e7eb 100%)`
+                  background: darkMode 
+                    ? `linear-gradient(to right, #2563eb 0%, #2563eb ${((config.gridSize - 2) / 6) * 100}%, #374151 ${((config.gridSize - 2) / 6) * 100}%, #374151 100%)`
+                    : `linear-gradient(to right, #2563eb 0%, #2563eb ${((config.gridSize - 2) / 6) * 100}%, #e5e7eb ${((config.gridSize - 2) / 6) * 100}%, #e5e7eb 100%)`
                 }}
               />
-              <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
                 <span>2×2</span>
                 <span>8×8</span>
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Border Padding: {config.borderPadding}px
               </label>
               <input
@@ -2290,14 +2356,16 @@ export default function PatternGenerator() {
                   ...prev, 
                   borderPadding: parseInt(e.target.value) 
                 }))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
+                className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
                 style={{
-                  background: `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.borderPadding / 64) * 100}%, #e5e7eb ${(config.borderPadding / 64) * 100}%, #e5e7eb 100%)`
+                  background: darkMode
+                    ? `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.borderPadding / 64) * 100}%, #374151 ${(config.borderPadding / 64) * 100}%, #374151 100%)`
+                    : `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.borderPadding / 64) * 100}%, #e5e7eb ${(config.borderPadding / 64) * 100}%, #e5e7eb 100%)`
                 }}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Spacing: {config.lineSpacing}px
               </label>
               <input
@@ -2310,14 +2378,16 @@ export default function PatternGenerator() {
                   ...prev, 
                   lineSpacing: parseInt(e.target.value) 
                 }))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
+                className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
                 style={{
-                  background: `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.lineSpacing / 64) * 100}%, #e5e7eb ${(config.lineSpacing / 64) * 100}%, #e5e7eb 100%)`
+                  background: darkMode
+                    ? `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.lineSpacing / 64) * 100}%, #374151 ${(config.lineSpacing / 64) * 100}%, #374151 100%)`
+                    : `linear-gradient(to right, #2563eb 0%, #2563eb ${(config.lineSpacing / 64) * 100}%, #e5e7eb ${(config.lineSpacing / 64) * 100}%, #e5e7eb 100%)`
                 }}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Empty Space: {config.emptySpace}%
               </label>
               <input
@@ -2330,9 +2400,11 @@ export default function PatternGenerator() {
                   ...prev, 
                   emptySpace: parseInt(e.target.value) 
                 }))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
+                className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600 hover:accent-blue-700 transition-colors"
                 style={{
-                  background: `linear-gradient(to right, #2563eb 0%, #2563eb ${config.emptySpace}%, #e5e7eb ${config.emptySpace}%, #e5e7eb 100%)`
+                  background: darkMode
+                    ? `linear-gradient(to right, #2563eb 0%, #2563eb ${config.emptySpace}%, #374151 ${config.emptySpace}%, #374151 100%)`
+                    : `linear-gradient(to right, #2563eb 0%, #2563eb ${config.emptySpace}%, #e5e7eb ${config.emptySpace}%, #e5e7eb 100%)`
                 }}
               />
             </div>
@@ -2340,7 +2412,7 @@ export default function PatternGenerator() {
 
           {/* SHAPES */}
           <div>
-            <h3 className="text-lg font-semibold mb-4">Shapes</h3>
+            <h3 className="text-lg font-semibold mb-4 dark:text-gray-200">Shapes</h3>
             <ShapeSelector
               selectedShapes={config.shapes}
               onSelectionChange={handleShapesChange}
@@ -2355,13 +2427,13 @@ export default function PatternGenerator() {
       {/* MAIN CANVAS AREA */}
       <div className="flex-1 flex flex-col">
         {/* TOP ACTION BAR */}
-        <div className="h-16 bg-white border-b border-gray-200 flex items-center justify-center gap-3 px-4">
+        <div className="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-center gap-3 px-4">
           {/* Undo */}
           <button
             type="button"
             onClick={handleUndo}
             disabled={historyIndex <= 0}
-            className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
 Undo
           </button>
@@ -2371,13 +2443,13 @@ Undo
             type="button"
             onClick={handleRedo}
             disabled={historyIndex >= history.length - 1}
-            className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
 Redo
           </button>
 
           {/* Separator */}
-          <div className="w-px h-8 bg-gray-300 mx-2"></div>
+          <div className="w-px h-8 bg-gray-300 dark:bg-gray-600 mx-2"></div>
 
           {/* Refresh Layout (only changes seed/layout, preserves color overrides) */}
           <button
@@ -2440,7 +2512,7 @@ Redo
                 }
               });
             }}
-            className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200"
+            className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
           >
 Refresh Layout
           </button>
@@ -2455,7 +2527,7 @@ Refresh Layout
                 emptySpace: 100 // Set to 100% to make all cells empty
               }));
             }}
-            className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200"
+            className="px-4 py-2 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200 rounded hover:bg-red-200 dark:hover:bg-red-800"
           >
 Clear Pattern
           </button>
@@ -2468,15 +2540,39 @@ Clear Pattern
               const newConfig = generateRandomConfig();
               setConfig(newConfig);
             }}
-            className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
+            className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 dark:bg-purple-600 dark:hover:bg-purple-700"
           >
 Randomize All
+          </button>
+          
+          {/* Dark Mode Toggle */}
+          <button
+            type="button"
+            onClick={() => setDarkMode(!darkMode)}
+            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors flex items-center gap-2"
+            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {darkMode ? (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+                <span>Light</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+                <span>Dark</span>
+              </>
+            )}
           </button>
         </div>
 
         {/* CANVAS */}
         <div 
-          className="flex-1 bg-gray-100 flex items-center justify-center p-8 relative"
+          className="flex-1 bg-gray-100 dark:bg-gray-900 flex items-center justify-center p-8 relative"
           data-canvas-container="true"
           ref={(canvasEl) => {
             if (canvasEl) {
@@ -2625,6 +2721,40 @@ Randomize All
                   return;
                 }
                 
+                // If it was a simple click (not a drag/marquee), check if we should deselect
+                if (mouseDownPos && !isDragging) {
+                  const dx = Math.abs(e.clientX - mouseDownPos.x);
+                  const dy = Math.abs(e.clientY - mouseDownPos.y);
+                  const timeSinceMouseDown = Date.now() - mouseDownTime;
+                  
+                  // Only treat as click if mouse didn't move much and it was quick
+                  if (dx < 5 && dy < 5 && timeSinceMouseDown < 200) {
+                    const target = e.target as HTMLElement;
+                    
+                    // Don't deselect if clicking on toolbar (check for both toolbars)
+                    const isOnToolbar = target.closest('.shape-toolbar') || 
+                                       (target.closest('.bg-white.rounded-lg.shadow-lg') && 
+                                        (target.closest('.absolute.bottom-4') || target.closest('.absolute.bottom-8')));
+                    if (isOnToolbar) {
+                      mouseDownPos = null;
+                      isDragging = false;
+                      return;
+                    }
+                    
+                    // Check if click is on the gray canvas area (not on SVG container)
+                    // The SVG container has its own click handler for shapes/cells
+                    const isOnSvgContainer = target.closest('[data-svg-container]');
+                    
+                    // If clicking on canvas container but NOT on SVG container (gray area around the grid)
+                    // Also check that we're actually clicking on the canvas container or its direct children
+                    if (!isOnSvgContainer && canvasEl.contains(target)) {
+                      // Clear selections when clicking on gray canvas area
+                      setSelectedShape(null);
+                      setSelectedCells(new Set());
+                    }
+                  }
+                }
+                
                 mouseDownPos = null;
                 isDragging = false;
               };
@@ -2655,9 +2785,9 @@ Randomize All
           }}
         >
           {/* Keep existing canvas/pattern display here */}
-          <div className="bg-gray-100 p-6 md:p-8 rounded-2xl w-full max-w-7xl flex items-center justify-center">
+          <div className="bg-white dark:bg-gray-900 p-6 md:p-8 rounded-2xl w-full max-w-7xl flex items-center justify-center">
             <div
-              className="bg-white rounded-xl overflow-hidden flex items-center justify-center mx-auto"
+              className="bg-white dark:bg-gray-900 rounded-xl overflow-hidden flex items-center justify-center mx-auto"
               style={{
                 width: `${previewCanvasSize[0]}px`,
                 height: `${previewCanvasSize[1]}px`,
@@ -2781,6 +2911,10 @@ Randomize All
                             return;
                           }
                           
+                          // Track if we clicked on a cell or shape
+                          let clickedOnCell = false;
+                          let clickedOnShape = false;
+                          
                           // Get SVG element to calculate cell position
                           const svgElement = el.querySelector('svg');
                           if (svgElement) {
@@ -2800,6 +2934,7 @@ Randomize All
                             // Get cell from point
                             const cell = getCellFromPoint(x, y);
                             if (cell) {
+                              clickedOnCell = true;
                               const cellKey = `${cell.row}_${cell.col}`;
                               
                               if (e.shiftKey) {
@@ -2825,6 +2960,7 @@ Randomize All
                           const shapeType = target.getAttribute('data-shape-type') as ShapeType | null;
                           const cellIndex = target.getAttribute('data-cell-index');
                           if (shapeType) {
+                            clickedOnShape = true;
                             // Get position relative to the container
                             const rect = target.getBoundingClientRect();
                             const containerRect = el.getBoundingClientRect();
@@ -2838,9 +2974,10 @@ Randomize All
                               y,
                               cellIndex: cellIndex ? parseInt(cellIndex, 10) : undefined
                             });
-                          } else {
-                            // Click outside shape - close toolbar
+                          } else if (!clickedOnCell) {
+                            // Click outside both shape and cell - clear both selections
                             setSelectedShape(null);
+                            setSelectedCells(new Set());
                           }
                           mouseDownPos = null;
                           isDragging = false;
@@ -3035,7 +3172,7 @@ Randomize All
                   />
                 </div>
               ) : (
-                <div className="flex items-center justify-center w-full h-full text-gray-400">
+                <div className="flex items-center justify-center w-full h-full text-gray-400 dark:text-gray-500">
                   Pattern will appear here
                 </div>
               )}
@@ -3045,8 +3182,10 @@ Randomize All
           {selectedCells.size > 0 && (
             <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-50">
               <div
-                className="bg-white rounded-lg shadow-lg border border-gray-200 p-3 pointer-events-auto"
+                className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-3 pointer-events-auto select-none"
                 onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                style={{ userSelect: 'none' }}
               >
                 <div className="flex items-center gap-2">
                   <button
@@ -3080,7 +3219,7 @@ Randomize All
                   <button
                     type="button"
                     onClick={() => setSelectedCells(new Set())}
-                    className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+                    className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
                   >
                     Close
                   </button>
@@ -3092,8 +3231,10 @@ Randomize All
           {selectedShape && (
             <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-50">
               <div
-                className="shape-toolbar bg-white rounded-lg shadow-lg border border-gray-200 p-3 pointer-events-auto"
+                className="shape-toolbar bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-3 pointer-events-auto select-none"
                 onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                style={{ userSelect: 'none' }}
               >
                 <div className="flex items-center gap-2">
                   {/* TEMPORARILY DISABLED: Shuffle Colors button
@@ -3148,7 +3289,7 @@ Randomize All
                   <button
                     type="button"
                     onClick={() => setSelectedShape(null)}
-                    className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-gray-50 rounded hover:bg-gray-100 transition-colors"
+                    className="px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
                   >
                     Close
                   </button>
@@ -3160,15 +3301,15 @@ Randomize All
       </div>
 
       {/* RIGHT SIDEBAR */}
-      <div className="w-[300px] bg-gray-50 border-l border-gray-200 overflow-y-auto">
+      <div className="w-[300px] bg-gray-50 dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto">
         <div className="p-4 space-y-6">
           {/* COLORS SECTION */}
           <div>
-            <h3 className="text-lg font-semibold mb-4">Colors</h3>
+            <h3 className="text-lg font-semibold mb-4 dark:text-gray-200">Colors</h3>
             
             {/* Background Color */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Background Color
               </label>
               <div className="flex items-center gap-3">
@@ -3201,7 +3342,7 @@ Randomize All
                       }));
                     });
                   }}
-                  className="flex-1 px-3 py-2 text-sm font-mono text-gray-600 bg-gray-50 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="flex-1 px-3 py-2 text-sm font-mono text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
                   placeholder="#FFFFFF"
                 />
               </div>
@@ -3221,9 +3362,9 @@ Randomize All
                       }));
                     }
                   }}
-                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                  className="w-4 h-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
                 />
-                <span className="text-sm text-gray-700">Use theme BG color</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">Use theme BG color</span>
               </label>
             </div>
 
@@ -3243,15 +3384,15 @@ Randomize All
             <button
               type="button"
               onClick={handleRandomizeColors}
-              className="w-full mt-3 px-4 py-3 text-sm font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors border border-purple-200 min-h-[44px] touch-manipulation"
+              className="w-full mt-3 px-4 py-3 text-sm font-medium text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-800 transition-colors border border-purple-200 dark:border-purple-700 min-h-[44px] touch-manipulation"
             >
 Randomize Colors
             </button>
           </div>
 
           {/* TILE BORDER SECTION */}
-          <div className="space-y-3 pb-6 border-b border-gray-200">
-            <h3 className="text-sm font-semibold text-gray-700">Tile Border</h3>
+          <div className="space-y-3 pb-6 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Tile Border</h3>
             
             {/* Enable border checkbox */}
             <label className="flex items-center gap-2 cursor-pointer">
@@ -3265,15 +3406,15 @@ Randomize Colors
                     enabled: e.target.checked 
                   }
                 }))}
-                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                className="w-4 h-4 text-blue-600 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
               />
-              <span className="text-sm font-medium text-gray-700">Enable Border</span>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Enable Border</span>
             </label>
             
             {/* Border width input */}
             {config.stroke?.enabled && (
               <div className="space-y-2">
-                <label className="block text-sm text-gray-600">
+                <label className="block text-sm text-gray-600 dark:text-gray-300">
                   Border Width (1-10px)
                 </label>
                 <input
@@ -3291,11 +3432,11 @@ Randomize Colors
                       }
                     }));
                   }}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
                 />
                 
                 {/* Border color input */}
-                <label className="block text-sm text-gray-600">
+                <label className="block text-sm text-gray-600 dark:text-gray-300">
                   Border Color
                 </label>
                 <div className="flex gap-2">
@@ -3309,7 +3450,7 @@ Randomize Colors
                         color: e.target.value 
                       }
                     }))}
-                    className="w-12 h-10 rounded border border-gray-300 cursor-pointer flex-shrink-0"
+                    className="w-12 h-10 rounded border border-gray-300 dark:border-gray-600 cursor-pointer flex-shrink-0"
                   />
                   <input
                     type="text"
@@ -3334,7 +3475,7 @@ Randomize Colors
                         }
                       }));
                     })}
-                    className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200 rounded-md font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
                     placeholder="#000000"
                   />
                 </div>
@@ -3344,10 +3485,10 @@ Randomize Colors
 
           {/* EXPORT SECTION */}
           <div>
-            <h3 className="text-lg font-semibold mb-4">Export</h3>
+            <h3 className="text-lg font-semibold mb-4 dark:text-gray-200">Export</h3>
             <div className="space-y-2">
               {exportMessage && (
-                <div className="px-3 py-2 bg-green-100 text-green-700 rounded-lg text-xs font-medium transition-opacity">
+                <div className="px-3 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg text-xs font-medium transition-opacity">
                   {exportMessage}
                 </div>
               )}
@@ -3386,11 +3527,11 @@ Export SVG
                       className="fixed inset-0 z-10"
                       onClick={() => setShowSvgMenu(false)}
                     />
-                    <div className="absolute left-0 mt-2 w-full bg-white rounded-lg shadow-lg border border-gray-200 z-20 py-1">
+                    <div className="absolute left-0 mt-2 w-full bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-20 py-1">
                       <button
                         type="button"
                         onClick={handleDownloadSVG}
-                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                        className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -3400,7 +3541,7 @@ Export SVG
                       <button
                         type="button"
                         onClick={handleCopySVG}
-                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                        className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />

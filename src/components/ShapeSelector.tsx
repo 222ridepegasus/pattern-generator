@@ -42,7 +42,7 @@ const NauticalIcon: React.FC<{ shapeKey: string; isSelected: boolean }> = ({ sha
 
   if (error) {
     return (
-      <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
+      <div className="w-full h-full flex items-center justify-center text-xs text-gray-400 dark:text-gray-500">
         {shapeKey.replace('nautical_', '').replace('_01', '').toUpperCase()}
       </div>
     );
@@ -51,7 +51,7 @@ const NauticalIcon: React.FC<{ shapeKey: string; isSelected: boolean }> = ({ sha
   if (!svgContent) {
     return (
       <div className="w-full h-full flex items-center justify-center">
-        <div className="w-3 h-3 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
+        <div className="w-3 h-3 border-2 border-gray-300 dark:border-gray-600 border-t-blue-600 dark:border-t-blue-400 rounded-full animate-spin"></div>
       </div>
     );
   }
@@ -119,21 +119,21 @@ export default function ShapeSelector({ selectedShapes, onSelectionChange, shape
           <button
             type="button"
             onClick={handleSelectAll}
-            className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+            className="px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
           >
             All
           </button>
           <button
             type="button"
             onClick={handleSelectSingle}
-            className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+            className="px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
           >
             Single
           </button>
           <button
             type="button"
             onClick={handleSelectRandom}
-            className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+            className="px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
           >
             Random
           </button>
@@ -141,20 +141,20 @@ export default function ShapeSelector({ selectedShapes, onSelectionChange, shape
             <button
               type="button"
               onClick={onClearGrid}
-              className="px-2 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+              className="px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
             >
               Clear
             </button>
           )}
         </div>
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-gray-500 dark:text-gray-400">
           {selectedShapes.length}/{MAX_SELECTED_SHAPES}
         </span>
       </div>
       
       {/* Nautical Flags Section */}
       <div>
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
           Nautical Flags
         </h3>
         <div className="grid grid-cols-4 gap-3">
@@ -170,24 +170,24 @@ export default function ShapeSelector({ selectedShapes, onSelectionChange, shape
             
             if (isSelected && isInPattern) {
               // Selected AND in pattern: solid blue border
-              borderClass = 'border-blue-600';
-              bgClass = 'bg-blue-50 text-blue-700';
+              borderClass = 'border-blue-600 dark:border-blue-500';
+              bgClass = 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
             } else if (isSelected && !isInPattern) {
               // Selected but NOT in pattern: dotted blue border
-              borderClass = 'border-blue-600 border-dashed';
-              bgClass = 'bg-blue-50/50 text-blue-600 opacity-50';
+              borderClass = 'border-blue-600 dark:border-blue-500 border-dashed';
+              bgClass = 'bg-blue-50/50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 opacity-50';
             } else if (isInPattern && !isSelected) {
               // In pattern but not selected: green border
-              borderClass = 'border-green-500';
-              bgClass = 'bg-green-50';
+              borderClass = 'border-green-500 dark:border-green-400';
+              bgClass = 'bg-green-50 dark:bg-green-900/30';
             } else if (isAtLimit) {
               // At limit: gray disabled
-              borderClass = 'border-gray-200';
-              bgClass = 'bg-gray-50 text-gray-400 cursor-not-allowed opacity-50';
+              borderClass = 'border-gray-200 dark:border-gray-700';
+              bgClass = 'bg-gray-50 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50';
             } else {
               // Default: normal gray border
-              borderClass = 'border-gray-200';
-              bgClass = 'bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50';
+              borderClass = 'border-gray-200 dark:border-gray-700';
+              bgClass = 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600';
             }
             
             return (
@@ -209,7 +209,7 @@ export default function ShapeSelector({ selectedShapes, onSelectionChange, shape
                 title={isAtLimit ? `Maximum ${MAX_SELECTED_SHAPES} shapes selected` : shape.replace('_', ' ')}
               >
                 {isInPattern && !isSelected && (
-                  <div className="absolute top-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
+                  <div className="absolute top-0 right-0 w-3 h-3 bg-green-500 dark:bg-green-400 rounded-full border-2 border-white dark:border-gray-800"></div>
                 )}
                 <div className="w-8 h-8 flex items-center justify-center">
                   <NauticalIcon shapeKey={shape} isSelected={isSelected} />

@@ -40,9 +40,9 @@ export default function PaletteSelector({ currentColors, onPaletteSelect }: Pale
   return (
     <div className="mb-4">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium text-gray-700">Color Palettes</h3>
+        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Color Palettes</h3>
         {isCustom && (
-          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+          <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
             Custom
           </span>
         )}
@@ -58,8 +58,8 @@ export default function PaletteSelector({ currentColors, onPaletteSelect }: Pale
               className={`
                 relative p-2 rounded-lg border-2 transition-all group
                 ${isActive
-                  ? 'border-blue-600 bg-blue-50 shadow-sm'
-                  : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'
+                  ? 'border-blue-600 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-sm'
+                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm'
                 }
               `}
               title={name.charAt(0).toUpperCase() + name.slice(1)}
@@ -73,7 +73,7 @@ export default function PaletteSelector({ currentColors, onPaletteSelect }: Pale
                   />
                 ))}
               </div>
-              <div className="text-xs font-medium text-gray-600 truncate">
+              <div className="text-xs font-medium text-gray-600 dark:text-gray-300 truncate">
                 {name.charAt(0).toUpperCase() + name.slice(1)}
               </div>
               {isActive && (
@@ -84,7 +84,7 @@ export default function PaletteSelector({ currentColors, onPaletteSelect }: Pale
                     viewBox="0 0 16 16"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
-                    className="text-blue-600"
+                    className="text-blue-600 dark:text-blue-400"
                   >
                     <circle cx="8" cy="8" r="8" fill="currentColor" />
                     <path
