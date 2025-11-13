@@ -70,6 +70,17 @@ export default function PatternGenerator() {
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [dragOverBackgroundColor, setDragOverBackgroundColor] = useState(false);
   const [dragOverBorderColor, setDragOverBorderColor] = useState(false);
+  const [shapePreviews, setShapePreviews] = useState<Record<string, string>>({});
+  const [shapesLoading, setShapesLoading] = useState(true);
+  
+  // Undo/Redo state
+  type HistoryState = {
+    patternCells: Record<string, CellData | null>;
+    config: PatternConfig;
+  };
+  const [history, setHistory] = useState<HistoryState[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const isUndoingOrRedoing = useRef(false);
 
   // Handle background color hex input change - normalize while typing
   const handleBackgroundColorHexChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -142,6 +153,31 @@ export default function PatternGenerator() {
       requestAnimationFrame(() => {
         e.currentTarget.select();
       });
+    }
+  };
+
+  // Undo/Redo functions
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      isUndoingOrRedoing.current = true;
+      const newIndex = historyIndex - 1;
+      const state = history[newIndex];
+      setHistoryIndex(newIndex);
+      setPatternCells(state.patternCells);
+      setConfig(state.config);
+      setTimeout(() => { isUndoingOrRedoing.current = false; }, 0);
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      isUndoingOrRedoing.current = true;
+      const newIndex = historyIndex + 1;
+      const state = history[newIndex];
+      setHistoryIndex(newIndex);
+      setPatternCells(state.patternCells);
+      setConfig(state.config);
+      setTimeout(() => { isUndoingOrRedoing.current = false; }, 0);
     }
   };
 
@@ -243,6 +279,75 @@ export default function PatternGenerator() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Load shape previews on mount
+  useEffect(() => {
+    const loadShapePreviews = async () => {
+      setShapesLoading(true);
+      const previews: Record<string, string> = {};
+      const shapesToLoad = availableShapes.nautical.slice(0, 26); // Load all 26 nautical flags
+      
+      await Promise.all(
+        shapesToLoad.map(async (shapeId) => {
+          try {
+            const response = await fetch(`/shapes/nautical/${shapeId}.svg`);
+            if (response.ok) {
+              let svgText = await response.text();
+              
+              // Modify colors for dark UI sidebar preview only (doesn't affect pattern engine)
+              // Simple rules: white → transparent, black → gray-500
+              svgText = svgText
+                .replace(/fill="([^"]*)"/g, (match, color) => {
+                  const lowerColor = color.toLowerCase();
+                  if (lowerColor === 'none') return match;
+                  // Make all white transparent
+                  if (lowerColor === 'white' || lowerColor === '#ffffff' || lowerColor === '#fff') {
+                    return 'fill="none"';
+                  }
+                  // Make all black gray-500
+                  if (lowerColor === 'black' || lowerColor === '#000000' || lowerColor === '#000') {
+                    return 'fill="#6b7280"';
+                  }
+                  return match;
+                })
+                .replace(/style="([^"]*)"/g, (match, styleContent) => {
+                  // Handle inline styles
+                  let newStyle = styleContent
+                    .replace(/fill:\s*white/gi, 'fill:none')
+                    .replace(/fill:\s*#fff(fff)?/gi, 'fill:none')
+                    .replace(/fill:\s*black/gi, 'fill:#6b7280')
+                    .replace(/fill:\s*#000(000)?/gi, 'fill:#6b7280');
+                  return `style="${newStyle}"`;
+                });
+              
+              // Create object URL from modified SVG
+              const blob = new Blob([svgText], { type: 'image/svg+xml' });
+              const url = URL.createObjectURL(blob);
+              previews[shapeId] = url;
+            } else {
+              console.warn(`Failed to load shape: ${shapeId}`);
+            }
+          } catch (error) {
+            console.error(`Error loading shape ${shapeId}:`, error);
+          }
+        })
+      );
+      
+      setShapePreviews(previews);
+      setShapesLoading(false);
+    };
+
+    loadShapePreviews();
+
+    // Cleanup: revoke all object URLs when component unmounts
+    return () => {
+      Object.values(shapePreviews).forEach(url => {
+        if (url.startsWith('blob:')) {
+          URL.revokeObjectURL(url);
+        }
+      });
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Calculate display dimensions (SVG stays 800×800, we just scale the display)
   const [containerWidth, containerHeight] = config.containerSize;
   const availableWidth = windowSize.width > 0 ? windowSize.width : (typeof window !== 'undefined' ? window.innerWidth : 1200);
@@ -302,6 +407,44 @@ export default function PatternGenerator() {
 
     generateSVG();
   }, [patternCells, config]);
+
+  // Track patternCells and config changes for undo/redo
+  useEffect(() => {
+    if (!isUndoingOrRedoing.current && Object.keys(patternCells).length > 0) {
+      setHistory(prev => {
+        // Remove any future history if we're not at the end
+        const newHistory = prev.slice(0, historyIndex + 1);
+        // Add new state (deep copy both patternCells and config)
+        newHistory.push({
+          patternCells: JSON.parse(JSON.stringify(patternCells)),
+          config: JSON.parse(JSON.stringify(config))
+        });
+        // Keep only last 20
+        if (newHistory.length > 20) {
+          newHistory.shift();
+          return newHistory;
+        }
+        return newHistory;
+      });
+      setHistoryIndex(prev => Math.min(prev + 1, 19));
+    }
+  }, [patternCells, config]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        handleUndo();
+      } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [historyIndex, history]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-randomize on first load
   useEffect(() => {
@@ -493,16 +636,33 @@ export default function PatternGenerator() {
           {/* Shape Browser Section */}
           <div>
             <h3 className="text-white text-lg font-semibold mb-4">Shapes</h3>
-            <div className="grid grid-cols-4 gap-2">
-              {availableShapes.nautical.slice(0, 24).map((shapeId) => (
-                <div
-                  key={shapeId}
-                  className="aspect-square bg-gray-700 rounded-lg border-2 border-gray-600 hover:border-blue-500 cursor-pointer flex items-center justify-center"
-                >
-                  <div className="w-8 h-8 bg-gray-600 rounded"></div>
-                </div>
-              ))}
-            </div>
+            {shapesLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-gray-400 text-sm">Loading shapes...</div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 gap-2">
+                {availableShapes.nautical.slice(0, 26).map((shapeId) => (
+                  <div
+                    key={shapeId}
+                    className="aspect-square bg-gray-700 rounded-lg border-2 border-transparent hover:border-blue-500 cursor-pointer flex items-center justify-center overflow-hidden p-2 transition-all"
+                    title={shapeId}
+                  >
+                    {shapePreviews[shapeId] ? (
+                      <img
+                        src={shapePreviews[shapeId]}
+                        alt={shapeId}
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gray-200 rounded flex items-center justify-center">
+                        <span className="text-xs text-gray-400">?</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -511,6 +671,23 @@ export default function PatternGenerator() {
       <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative overflow-y-auto custom-scrollbar">
         {/* Floating Randomization Buttons */}
         <div className="absolute top-4 md:top-6≤≥ left-1/2 transform -translate-x-1/2 z-10 flex gap-3 bg-gray-800/90 backdrop-blur px-2 py-2 rounded-lg shadow-lg">
+          <button
+            onClick={handleUndo}
+            disabled={historyIndex <= 0}
+            className="px-5 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Undo (Cmd/Ctrl + Z)"
+          >
+            Undo
+          </button>
+          <button
+            onClick={handleRedo}
+            disabled={historyIndex >= history.length - 1}
+            className="px-5 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Redo (Cmd/Ctrl + Shift + Z)"
+          >
+            Redo
+          </button>
+          <div className="w-px bg-gray-600 self-stretch" />
           <button
             onClick={handleRandomizeAll}
             className="px-5 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 font-medium whitespace-nowrap"
