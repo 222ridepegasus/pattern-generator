@@ -3,6 +3,22 @@ import type { PatternConfig, ShapeType } from '../lib/types';
 import { generatePattern, patternToSVG } from '../lib/patternEngine';
 import { availableShapes } from '../lib/shapeLoader.js';
 import { COLOR_PALETTES } from '../lib/types';
+import ColorPickers from './ColorPickers';
+import PaletteSelector from './PaletteSelector';
+
+// Helper function to normalize hex color input
+const normalizeHexColor = (value: string): string => {
+  // Remove any whitespace
+  value = value.trim();
+  // Remove # if present
+  value = value.replace(/^#/, '');
+  // Only allow hex characters (0-9, A-F, a-f)
+  value = value.replace(/[^0-9A-Fa-f]/g, '');
+  // Limit to 6 characters
+  value = value.slice(0, 6);
+  // Add # prefix
+  return value ? `#${value.toUpperCase()}` : '#';
+};
 
 /**
  * Cell data structure - our single source of truth
@@ -17,7 +33,17 @@ interface CellData {
   fgColorIndex: number;
 }
 
+// Helper to pick random theme on load
+function getRandomTheme() {
+    const themeNames = Object.keys(COLOR_PALETTES);
+    return themeNames[Math.floor(Math.random() * themeNames.length)];
+  }
+
 export default function PatternGenerator() {
+  // Get random theme on load
+  const initialTheme = getRandomTheme();
+  const initialColors = COLOR_PALETTES[initialTheme as keyof typeof COLOR_PALETTES];
+
   // Basic config (grid settings, colors, shapes)
   const [config, setConfig] = useState<PatternConfig>({
     seed: Date.now(),
@@ -28,9 +54,9 @@ export default function PatternGenerator() {
     lineSpacing: 8,
     emptySpace: 0,
     spacing: 0,
-    backgroundColor: '#1a1a1a',
-    shapes: availableShapes.nautical.slice(0, 10),
-    colors: ['#FFFFFF', '#000000'],
+    backgroundColor: initialColors[0],
+    shapes: availableShapes.nautical.slice(0, 10) as ShapeType[],
+    colors: initialColors,
     rotation: { enabled: false },
     mirror: { horizontal: false, vertical: false },
     preserveLayout: true,
@@ -41,7 +67,199 @@ export default function PatternGenerator() {
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
   const [svgContent, setSvgContent] = useState<string>('');
   const [syncBackgroundColor, setSyncBackgroundColor] = useState(true);
-  const [selectedTheme, setSelectedTheme] = useState<string>('Nautical Modern');
+  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  const [dragOverBackgroundColor, setDragOverBackgroundColor] = useState(false);
+  const [dragOverBorderColor, setDragOverBorderColor] = useState(false);
+
+  // Handle background color hex input change - normalize while typing
+  const handleBackgroundColorHexChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const normalized = normalizeHexColor(value);
+    setSyncBackgroundColor(false);
+    setConfig(prev => ({ ...prev, backgroundColor: normalized }));
+  };
+
+  // Handle background color hex input focus - select all text
+  const handleBackgroundColorHexFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    setTimeout(() => {
+      e.target.select();
+    }, 0);
+  };
+
+  // Handle background color hex input click - select all on click
+  const handleBackgroundColorHexClick = (e: React.MouseEvent<HTMLInputElement>) => {
+    e.currentTarget.select();
+  };
+
+  // Handle background color hex input paste - works with selected text
+  const handleBackgroundColorHexPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pastedText = e.clipboardData.getData('text');
+    const normalized = normalizeHexColor(pastedText);
+    if (normalized.length > 1) { // More than just '#'
+      setSyncBackgroundColor(false);
+      setConfig(prev => ({ ...prev, backgroundColor: normalized }));
+      requestAnimationFrame(() => {
+        e.currentTarget.select();
+      });
+    }
+  };
+
+  // Handle border color hex input change - normalize while typing
+  const handleBorderColorHexChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const normalized = normalizeHexColor(value);
+    setConfig(prev => ({
+      ...prev,
+      stroke: { ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), color: normalized }
+    }));
+  };
+
+  // Handle border color hex input focus - select all text
+  const handleBorderColorHexFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    setTimeout(() => {
+      e.target.select();
+    }, 0);
+  };
+
+  // Handle border color hex input click - select all on click
+  const handleBorderColorHexClick = (e: React.MouseEvent<HTMLInputElement>) => {
+    e.currentTarget.select();
+  };
+
+  // Handle border color hex input paste - works with selected text
+  const handleBorderColorHexPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pastedText = e.clipboardData.getData('text');
+    const normalized = normalizeHexColor(pastedText);
+    if (normalized.length > 1) { // More than just '#'
+      setConfig(prev => ({
+        ...prev,
+        stroke: { ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), color: normalized }
+      }));
+      requestAnimationFrame(() => {
+        e.currentTarget.select();
+      });
+    }
+  };
+
+  // Handle drag start for background color - make it draggable to theme colors
+  const handleBackgroundColorDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+    e.dataTransfer.effectAllowed = 'copyMove';
+    e.dataTransfer.setData('text/plain', config.backgroundColor);
+    e.dataTransfer.setData('application/x-source', 'background-color');
+  };
+
+  // Handle drag over background color - allow drop from theme colors
+  const handleBackgroundColorDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setDragOverBackgroundColor(true);
+  };
+
+  // Handle drag leave background color
+  const handleBackgroundColorDragLeave = () => {
+    setDragOverBackgroundColor(false);
+  };
+
+  // Handle drop on background color - update from theme color, border color, or any color
+  const handleBackgroundColorDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const source = e.dataTransfer.getData('application/x-source');
+    // Accept drops from theme colors, border color, or if no source (fallback)
+    // Don't accept drops from background-color itself (would be redundant)
+    if (source !== 'background-color') {
+      const colorValue = e.dataTransfer.getData('text/plain');
+      if (colorValue) {
+        const normalized = normalizeHexColor(colorValue);
+        if (normalized.length > 1) {
+          setSyncBackgroundColor(false); // Uncheck "Use theme BG color"
+          setConfig(prev => ({ ...prev, backgroundColor: normalized }));
+        }
+      }
+    }
+    setDragOverBackgroundColor(false);
+  };
+
+  // Handle drag start for border color - make it draggable to theme colors
+  const handleBorderColorDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+    e.dataTransfer.effectAllowed = 'copyMove';
+    e.dataTransfer.setData('text/plain', config.stroke?.color || '#000000');
+    e.dataTransfer.setData('application/x-source', 'border-color');
+  };
+
+  // Handle drag over border color - allow drop from theme colors
+  const handleBorderColorDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setDragOverBorderColor(true);
+  };
+
+  // Handle drag leave border color
+  const handleBorderColorDragLeave = () => {
+    setDragOverBorderColor(false);
+  };
+
+  // Handle drop on border color - update from theme color, background color, or any color
+  const handleBorderColorDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const source = e.dataTransfer.getData('application/x-source');
+    // Accept drops from theme colors, background color, or if no source (fallback)
+    // Don't accept drops from border-color itself (would be redundant)
+    if (source !== 'border-color') {
+      const colorValue = e.dataTransfer.getData('text/plain');
+      if (colorValue) {
+        const normalized = normalizeHexColor(colorValue);
+        if (normalized.length > 1) {
+          setConfig(prev => ({
+            ...prev,
+            stroke: { ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), color: normalized }
+          }));
+        }
+      }
+    }
+    setDragOverBorderColor(false);
+  };
+
+  // Track window size for responsive canvas display
+  useEffect(() => {
+    const handleResize = () => {
+      setWindowSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+
+    // Set initial size
+    handleResize();
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Calculate display dimensions (SVG stays 800×800, we just scale the display)
+  const [containerWidth, containerHeight] = config.containerSize;
+  const availableWidth = windowSize.width > 0 ? windowSize.width : (typeof window !== 'undefined' ? window.innerWidth : 1200);
+  const availableHeight = windowSize.height > 0 ? windowSize.height : (typeof window !== 'undefined' ? window.innerHeight : 800);
+  
+  // Calculate max display size (85% of available space, never bigger than 800px)
+  const maxDisplayWidth = Math.min(800, availableWidth * 0.85);
+  const maxDisplayHeight = Math.min(800, (availableHeight - 200) * 0.85);
+  
+  // Calculate scale to fit (ONLY scale down, never up)
+  const scaleX = maxDisplayWidth / containerWidth;
+  const scaleY = maxDisplayHeight / containerHeight;
+  const scale = Math.min(scaleX, scaleY, 1);
+  
+  // Calculate final display dimensions
+  const displayWidth = containerWidth * scale;
+  const displayHeight = containerHeight * scale;
 
   // Generate SVG whenever patternCells or config changes
   useEffect(() => {
@@ -179,17 +397,6 @@ export default function PatternGenerator() {
     setPatternCells({});
   };
 
-  // Theme change handler
-  const handleThemeChange = (themeName: string) => {
-    setSelectedTheme(themeName);
-    const themeColors = COLOR_PALETTES[themeName as keyof typeof COLOR_PALETTES];
-    setConfig(prev => ({
-      ...prev,
-      colors: themeColors,
-      backgroundColor: syncBackgroundColor ? themeColors[0] : prev.backgroundColor,
-    }));
-  };
-
   // Copy SVG to clipboard
   const handleCopySVG = async () => {
     try {
@@ -214,10 +421,10 @@ export default function PatternGenerator() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex">
+    <div className="h-screen bg-gray-900 flex overflow-hidden">
       {/* LEFT SIDEBAR - Grid Settings & Shape Browser */}
-      <div className="hidden md:block w-80 bg-gray-800 border-r border-gray-700 overflow-y-auto">
-        <div className="p-6 space-y-6">
+      <div className="hidden md:block w-[280px] bg-gray-800 border-r border-gray-700 overflow-y-auto custom-scrollbar">
+        <div className="pl-4 pr-3 py-6 space-y-6">
           {/* Grid Settings Section */}
           <div>
             <h3 className="text-white text-lg font-semibold mb-4">Grid Settings</h3>
@@ -301,47 +508,65 @@ export default function PatternGenerator() {
       </div>
 
       {/* CENTER - Canvas with Floating Buttons */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative">
+      <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative overflow-y-auto custom-scrollbar">
         {/* Floating Randomization Buttons */}
-        <div className="absolute top-4 md:top-8 left-1/2 transform -translate-x-1/2 z-10 flex gap-2 bg-gray-800/90 backdrop-blur px-4 py-2 rounded-lg shadow-lg">
+        <div className="absolute top-4 md:top-6≤≥ left-1/2 transform -translate-x-1/2 z-10 flex gap-3 bg-gray-800/90 backdrop-blur px-2 py-2 rounded-lg shadow-lg">
           <button
             onClick={handleRandomizeAll}
-            className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 font-medium"
+            className="px-5 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 font-medium whitespace-nowrap"
           >
             Randomize All
           </button>
           <button
             onClick={handleShuffle}
-            className="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 font-medium"
+            className="px-5 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 font-medium whitespace-nowrap"
           >
             Shuffle
           </button>
           <button
             onClick={handleRandomShapes}
-            className="px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 font-medium"
+            className="px-5 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 font-medium whitespace-nowrap"
           >
             Random Shapes
           </button>
           <button
             onClick={handleSingleShape}
-            className="px-3 py-1.5 bg-yellow-600 text-white text-sm rounded hover:bg-yellow-700 font-medium"
+            className="px-5 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 font-medium whitespace-nowrap"
           >
             Single Shape
           </button>
           <button
             onClick={handleClear}
-            className="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 font-medium"
+            className="px-5 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 font-medium whitespace-nowrap"
           >
             Clear
           </button>
         </div>
 
+        
+
         {/* Canvas */}
-        <div className="bg-white rounded-lg shadow-2xl p-4 max-w-full">
+        <div 
+          className="rounded-lg shadow-2xl overflow-hidden flex items-center justify-center mx-auto"
+          style={{
+            width: `${displayWidth}px`,
+            height: `${displayHeight}px`,
+            maxWidth: '100%',
+            maxHeight: `${maxDisplayHeight}px`,
+            backgroundColor: config.backgroundColor,
+          }}
+        >
           {svgContent ? (
-            <div dangerouslySetInnerHTML={{ __html: svgContent }} />
+            <div 
+              className="w-full h-full flex items-center justify-center"
+              style={{
+                minWidth: 0,
+                minHeight: 0,
+              }}
+              dangerouslySetInnerHTML={{ __html: svgContent }} 
+            />
           ) : (
-            <div className="w-[800px] h-[800px] flex items-center justify-center text-gray-400">
+            <div className="flex items-center justify-center text-gray-400 w-full h-full">
               Empty Grid
             </div>
           )}
@@ -349,8 +574,8 @@ export default function PatternGenerator() {
       </div>
 
       {/* RIGHT SIDEBAR - Colors, Border, Export */}
-      <div className="hidden md:block w-80 bg-gray-800 border-l border-gray-700 overflow-y-auto">
-        <div className="p-6 space-y-6">
+      <div className="hidden md:block w-[280px] bg-gray-800 border-l border-gray-700 overflow-y-auto custom-scrollbar">
+        <div className="pl-4 pr-3 py-6 space-y-6">
           {/* Colors Section */}
           <div>
             <h3 className="text-white text-lg font-semibold mb-4">Colors</h3>
@@ -360,23 +585,9 @@ export default function PatternGenerator() {
               <label className="text-gray-300 text-sm font-medium mb-2 block">
                 Background Color
               </label>
-              <div className="flex gap-2">
-                <input
-                  type="color"
-                  value={config.backgroundColor}
-                  onChange={(e) => setConfig(prev => ({ ...prev, backgroundColor: e.target.value }))}
-                  className="w-12 h-10 rounded border border-gray-600 cursor-pointer"
-                />
-                <input
-                  type="text"
-                  value={config.backgroundColor}
-                  onChange={(e) => setConfig(prev => ({ ...prev, backgroundColor: e.target.value }))}
-                  className="flex-1 px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 text-sm font-mono"
-                />
-              </div>
               
               {/* Use Theme BG Checkbox */}
-              <label className="flex items-center gap-2 mt-3 cursor-pointer">
+              <label className="flex items-center gap-2 mb-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={syncBackgroundColor}
@@ -390,36 +601,69 @@ export default function PatternGenerator() {
                 />
                 <span className="text-gray-300 text-sm">Use theme BG color</span>
               </label>
-            </div>
-
-            {/* Color Palettes */}
-            <div>
-              <label className="text-gray-300 text-sm font-medium mb-2 block">
-                Color Palettes
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {Object.entries(COLOR_PALETTES).map(([name, colors]) => (
-                  <button
-                    key={name}
-                    onClick={() => handleThemeChange(name)}
-                    className={`p-2 rounded border-2 ${
-                      selectedTheme === name ? 'border-blue-500' : 'border-gray-600'
-                    } hover:border-blue-400 transition-colors`}
-                  >
-                    <div className="flex gap-1 mb-1">
-                      {colors.slice(0, 5).map((color, i) => (
-                        <div
-                          key={i}
-                          className="h-6 flex-1 rounded"
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
-                    </div>
-                    <div className="text-xs text-gray-300 truncate">{name}</div>
-                  </button>
-                ))}
+              
+              <div className="flex items-center gap-2">
+                <div
+                  draggable
+                  onDragStart={handleBackgroundColorDragStart}
+                  onDragOver={handleBackgroundColorDragOver}
+                  onDragLeave={handleBackgroundColorDragLeave}
+                  onDrop={handleBackgroundColorDrop}
+                  className={`rounded border border-gray-600 bg-gray-700 cursor-move flex-shrink-0 transition-all ${
+                    dragOverBackgroundColor ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-800' : ''
+                  }`}
+                >
+                  <input
+                    type="color"
+                    value={config.backgroundColor}
+                    onChange={(e) => {
+                      setSyncBackgroundColor(false);
+                      setConfig(prev => ({ ...prev, backgroundColor: e.target.value }));
+                    }}
+                    className="w-12 h-10 rounded border-0 bg-transparent cursor-pointer"
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <input
+                    type="text"
+                    value={config.backgroundColor.toUpperCase()}
+                    onChange={handleBackgroundColorHexChange}
+                    onFocus={handleBackgroundColorHexFocus}
+                    onClick={handleBackgroundColorHexClick}
+                    onPaste={handleBackgroundColorHexPaste}
+                    onDragOver={handleBackgroundColorDragOver}
+                    onDragLeave={handleBackgroundColorDragLeave}
+                    onDrop={handleBackgroundColorDrop}
+                    className={`w-full px-3 py-2 text-sm font-mono text-white bg-gray-700 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${
+                      dragOverBackgroundColor ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-gray-800' : ''
+                    }`}
+                    placeholder="#FFFFFF"
+                  />
+                </div>
               </div>
             </div>
+            
+            <PaletteSelector 
+              currentColors={config.colors}
+              onPaletteSelect={(colors) => {
+                setConfig(prev => ({
+                  ...prev,
+                  colors,
+                  backgroundColor: syncBackgroundColor ? colors[0] : prev.backgroundColor,
+                }));
+              }}
+            />
+            
+            <ColorPickers
+              colors={config.colors}
+              onColorsChange={(colors) => {
+                setConfig(prev => ({
+                  ...prev,
+                  colors,
+                  backgroundColor: syncBackgroundColor ? colors[0] : prev.backgroundColor,
+                }));
+              }}
+            />
           </div>
 
           {/* Border Section */}
@@ -445,15 +689,15 @@ export default function PatternGenerator() {
                 {/* Border Width */}
                 <div className="mb-4">
                   <label className="text-gray-300 text-sm font-medium mb-2 block">
-                    Border Width (1-10px)
+                    Border Width (1-12px)
                   </label>
                   <input
                     type="number"
                     min="1"
-                    max="10"
+                    max="12"
                     value={config.stroke?.width || 1}
                     onChange={(e) => {
-                      const value = Math.max(1, Math.min(10, parseInt(e.target.value) || 1));
+                      const value = Math.max(1, Math.min(12, parseInt(e.target.value) || 1));
                       setConfig(prev => ({
                         ...prev,
                         stroke: { ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), width: value }
@@ -468,25 +712,44 @@ export default function PatternGenerator() {
                   <label className="text-gray-300 text-sm font-medium mb-2 block">
                     Border Color
                   </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="color"
-                      value={config.stroke?.color || '#000000'}
-                      onChange={(e) => setConfig(prev => ({
-                        ...prev,
-                        stroke: { ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), color: e.target.value }
-                      }))}
-                      className="w-12 h-10 rounded border border-gray-600 cursor-pointer"
-                    />
-                    <input
-                      type="text"
-                      value={config.stroke?.color || '#000000'}
-                      onChange={(e) => setConfig(prev => ({
-                        ...prev,
-                        stroke: { ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), color: e.target.value }
-                      }))}
-                      className="flex-1 px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 text-sm font-mono"
-                    />
+                  <div className="flex items-center gap-2">
+                    <div
+                      draggable
+                      onDragStart={handleBorderColorDragStart}
+                      onDragOver={handleBorderColorDragOver}
+                      onDragLeave={handleBorderColorDragLeave}
+                      onDrop={handleBorderColorDrop}
+                      className={`rounded border border-gray-600 bg-gray-700 cursor-move flex-shrink-0 transition-all ${
+                        dragOverBorderColor ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-800' : ''
+                      }`}
+                    >
+                      <input
+                        type="color"
+                        value={config.stroke?.color || '#000000'}
+                        onChange={(e) => setConfig(prev => ({
+                          ...prev,
+                          stroke: { ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), color: e.target.value }
+                        }))}
+                        className="w-12 h-10 rounded border-0 bg-transparent cursor-pointer"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="text"
+                        value={(config.stroke?.color || '#000000').toUpperCase()}
+                        onChange={handleBorderColorHexChange}
+                        onFocus={handleBorderColorHexFocus}
+                        onClick={handleBorderColorHexClick}
+                        onPaste={handleBorderColorHexPaste}
+                        onDragOver={handleBorderColorDragOver}
+                        onDragLeave={handleBorderColorDragLeave}
+                        onDrop={handleBorderColorDrop}
+                        className={`w-full px-3 py-2 text-sm font-mono text-white bg-gray-700 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${
+                          dragOverBorderColor ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-gray-800' : ''
+                        }`}
+                        placeholder="#FFFFFF"
+                      />
+                    </div>
                   </div>
                 </div>
               </>
@@ -499,13 +762,13 @@ export default function PatternGenerator() {
             <div className="space-y-2">
               <button
                 onClick={handleCopySVG}
-                className="w-full px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium"
+                className="w-full px-4 py-2 text-sm font-medium text-white bg-gray-700 rounded hover:bg-gray-600 transition-colors"
               >
                 Copy SVG
               </button>
               <button
                 onClick={handleExportSVG}
-                className="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+                className="w-full px-4 py-2 text-sm font-medium text-white bg-gray-700 rounded hover:bg-gray-600 transition-colors"
               >
                 Export SVG
               </button>

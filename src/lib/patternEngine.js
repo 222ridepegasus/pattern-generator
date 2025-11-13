@@ -126,6 +126,7 @@ export async function loadShapeWithColors(shapeId, bgColor, fgColor) {
       lineSpacing = 0,
       gridSize = 4,
       colors = ['#FFFFFF', '#000000'],
+      stroke,
     } = config;
   
     const layout = calculatePatternLayout({
@@ -203,6 +204,39 @@ export async function loadShapeWithColors(shapeId, bgColor, fgColor) {
         elements.push(group);
       }
     }
+
+    // Add borders for all tiles if enabled
+    if (stroke?.enabled) {
+      const borderWidth = Math.min(stroke.width || 1, 12);
+      const borderColor = stroke.color || '#000000';
+      const halfStroke = borderWidth / 2;
+      
+      // Loop through all grid positions
+      for (let row = 0; row < gridSize; row++) {
+        for (let col = 0; col < gridSize; col++) {
+          const x = offsetX + (col * (tileSize + lineSpacing));
+          const y = offsetY + (row * (tileSize + lineSpacing));
+          
+          // Create border rect positioned inside the tile
+          const borderRect = {
+            type: 'rect',
+            attrs: {
+              x: x + halfStroke,
+              y: y + halfStroke,
+              width: tileSize - borderWidth,
+              height: tileSize - borderWidth,
+              stroke: borderColor,
+              'stroke-width': borderWidth,
+              fill: 'none',
+              'data-cell-key': `${row}_${col}`,
+              'data-border': 'true',
+            },
+          };
+          
+          elements.push(borderRect);
+        }
+      }
+    }
   
     return elements;
   }
@@ -219,6 +253,11 @@ export async function loadShapeWithColors(shapeId, bgColor, fgColor) {
           .map(([key, value]) => `${key}="${value}"`)
           .join(' ');
         return `<g ${attrs}>${el.innerHTML}</g>`;
+      } else if (el.type === 'rect') {
+        const attrs = Object.entries(el.attrs)
+          .map(([key, value]) => `${key}="${value}"`)
+          .join(' ');
+        return `<rect ${attrs} />`;
       }
       return '';
     }).join('\n  ');
