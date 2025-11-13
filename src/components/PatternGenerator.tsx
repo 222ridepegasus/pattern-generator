@@ -40,6 +40,13 @@ function getRandomTheme() {
   }
 
 export default function PatternGenerator() {
+  // Helper function to pick 4-8 random shapes
+  const pickRandomShapes = (): ShapeType[] => {
+    const count = Math.floor(Math.random() * 5) + 4; // Random between 4-8
+    const shuffled = [...availableShapes.nautical].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, count) as ShapeType[];
+  };
+
   // Get random theme on load
   const initialTheme = getRandomTheme();
   const initialColors = COLOR_PALETTES[initialTheme as keyof typeof COLOR_PALETTES];
@@ -55,7 +62,7 @@ export default function PatternGenerator() {
     emptySpace: 0,
     spacing: 0,
     backgroundColor: initialColors[0],
-    shapes: availableShapes.nautical.slice(0, 10) as ShapeType[],
+    shapes: pickRandomShapes(),
     colors: initialColors,
     rotation: { enabled: false },
     mirror: { horizontal: false, vertical: false },
@@ -141,8 +148,8 @@ export default function PatternGenerator() {
 
   // Handle border color hex input paste - works with selected text
   const handleBorderColorHexPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+        e.preventDefault();
+        e.stopPropagation();
     const pastedText = e.clipboardData.getData('text');
     const normalized = normalizeHexColor(pastedText);
     if (normalized.length > 1) { // More than just '#'
@@ -190,7 +197,7 @@ export default function PatternGenerator() {
 
   // Handle drag over background color - allow drop from theme colors
   const handleBackgroundColorDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
+        e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
     setDragOverBackgroundColor(true);
@@ -203,7 +210,7 @@ export default function PatternGenerator() {
 
   // Handle drop on background color - update from theme color, border color, or any color
   const handleBackgroundColorDrop = (e: React.DragEvent) => {
-    e.preventDefault();
+        e.preventDefault();
     e.stopPropagation();
     const source = e.dataTransfer.getData('application/x-source');
     // Accept drops from theme colors, border color, or if no source (fallback)
@@ -230,7 +237,7 @@ export default function PatternGenerator() {
 
   // Handle drag over border color - allow drop from theme colors
   const handleBorderColorDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
+        e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
     setDragOverBorderColor(true);
@@ -243,7 +250,7 @@ export default function PatternGenerator() {
 
   // Handle drop on border color - update from theme color, background color, or any color
   const handleBorderColorDrop = (e: React.DragEvent) => {
-    e.preventDefault();
+        e.preventDefault();
     e.stopPropagation();
     const source = e.dataTransfer.getData('application/x-source');
     // Accept drops from theme colors, background color, or if no source (fallback)
@@ -365,7 +372,7 @@ export default function PatternGenerator() {
   // Calculate final display dimensions
   const displayWidth = containerWidth * scale;
   const displayHeight = containerHeight * scale;
-
+  
   // Generate SVG whenever patternCells or config changes
   useEffect(() => {
     async function generateSVG() {
@@ -453,12 +460,35 @@ export default function PatternGenerator() {
 
   // Randomization functions
   const handleRandomizeAll = () => {
-    const newCells: Record<string, CellData | null> = {};
-    const gridSize = config.gridSize;
-    const randomShape = () => config.shapes[Math.floor(Math.random() * config.shapes.length)];
+    // Randomize everything!
+    const randomGridSize = Math.floor(Math.random() * 7) + 2; // 2-8
+    const randomBorderPadding = Math.floor(Math.random() * 9) * 8; // 0, 8, 16, 24, 32, 40, 48, 56, 64
+    const randomSpacing = Math.floor(Math.random() * 9) * 8; // 0, 8, 16, 24, 32, 40, 48, 56, 64
     
-    for (let row = 0; row < gridSize; row++) {
-      for (let col = 0; col < gridSize; col++) {
+    // Random theme
+    const randomTheme = getRandomTheme();
+    const randomColors = COLOR_PALETTES[randomTheme as keyof typeof COLOR_PALETTES];
+    
+    // Random shape subset (4-8 shapes)
+    const newShapes = pickRandomShapes();
+    
+    // Update config with all randomized values
+    setConfig(prev => ({
+      ...prev,
+          gridSize: randomGridSize,
+          borderPadding: randomBorderPadding,
+      lineSpacing: randomSpacing,
+      shapes: newShapes,
+          colors: randomColors,
+      backgroundColor: randomColors[0],
+    }));
+    
+    // Fill ALL cells with random shapes from new subset
+    const newCells: Record<string, CellData | null> = {};
+    const randomShape = () => newShapes[Math.floor(Math.random() * newShapes.length)];
+    
+    for (let row = 0; row < randomGridSize; row++) {
+      for (let col = 0; col < randomGridSize; col++) {
         const cellKey = `${row}_${col}`;
         newCells[cellKey] = {
           shapeId: randomShape(),
@@ -472,6 +502,7 @@ export default function PatternGenerator() {
     }
     
     setPatternCells(newCells);
+    setSyncBackgroundColor(true); // Reset to use theme BG color
   };
 
   const handleShuffle = () => {
@@ -499,23 +530,41 @@ export default function PatternGenerator() {
   };
 
   const handleRandomShapes = () => {
+    // Keep current shape subset (don't change config.shapes)
+    // Only replace shapes in cells with random from CURRENT subset
+    if (config.shapes.length === 0) return; // Safety check
+    
     const newCells: Record<string, CellData | null> = {};
     const randomShape = () => config.shapes[Math.floor(Math.random() * config.shapes.length)];
     
-    Object.keys(patternCells).forEach(cellKey => {
-      const cell = patternCells[cellKey];
-      if (cell) {
-        newCells[cellKey] = { ...cell, shapeId: randomShape() };
+    // Iterate through all cells in the grid (not just existing patternCells)
+    const gridSize = config.gridSize;
+    for (let row = 0; row < gridSize; row++) {
+      for (let col = 0; col < gridSize; col++) {
+        const cellKey = `${row}_${col}`;
+        const cell = patternCells[cellKey];
+    if (cell) {
+          // Replace shape with random from current subset
+          newCells[cellKey] = { ...cell, shapeId: randomShape() };
       } else {
-        newCells[cellKey] = null;
+          // Keep empty cells empty
+          newCells[cellKey] = null;
+        }
       }
-    });
+    }
     
     setPatternCells(newCells);
   };
 
   const handleSingleShape = () => {
-    const randomShape = config.shapes[Math.floor(Math.random() * config.shapes.length)];
+    // Pick a random shape from all available shapes
+    const allShapes = availableShapes.nautical;
+    const randomShape = allShapes[Math.floor(Math.random() * allShapes.length)] as ShapeType;
+    
+    // Update config.shapes to only contain this single shape
+    setConfig(prev => ({ ...prev, shapes: [randomShape] }));
+    
+    // Fill all cells with this single shape
     const newCells: Record<string, CellData | null> = {};
     const gridSize = config.gridSize;
     
@@ -543,7 +592,7 @@ export default function PatternGenerator() {
   // Copy SVG to clipboard
   const handleCopySVG = async () => {
     try {
-      await navigator.clipboard.writeText(svgContent);
+        await navigator.clipboard.writeText(svgContent);
       alert('SVG copied to clipboard!');
     } catch (err) {
       console.error('Failed to copy SVG:', err);
@@ -569,7 +618,7 @@ export default function PatternGenerator() {
       <div className="hidden md:block w-[280px] bg-gray-800 border-r border-gray-700 overflow-y-auto custom-scrollbar">
         <div className="pl-4 pr-3 py-6 space-y-6">
           {/* Grid Settings Section */}
-          <div>
+            <div>
             <h3 className="text-white text-lg font-semibold mb-4">Grid Settings</h3>
             
             {/* Grid Size Slider */}
@@ -609,7 +658,7 @@ export default function PatternGenerator() {
               <div className="flex justify-between text-xs text-gray-500 mt-1">
                 <span>0px</span>
                 <span>64px</span>
-              </div>
+            </div>
             </div>
 
             {/* Line Spacing Slider */}
@@ -629,7 +678,7 @@ export default function PatternGenerator() {
               <div className="flex justify-between text-xs text-gray-500 mt-1">
                 <span>0px</span>
                 <span>64px</span>
-              </div>
+            </div>
             </div>
           </div>
 
@@ -639,28 +688,36 @@ export default function PatternGenerator() {
             {shapesLoading ? (
               <div className="flex items-center justify-center py-8">
                 <div className="text-gray-400 text-sm">Loading shapes...</div>
-              </div>
+          </div>
             ) : (
               <div className="grid grid-cols-4 gap-2">
-                {availableShapes.nautical.slice(0, 26).map((shapeId) => (
-                  <div
-                    key={shapeId}
-                    className="aspect-square bg-gray-700 rounded-lg border-2 border-transparent hover:border-blue-500 cursor-pointer flex items-center justify-center overflow-hidden p-2 transition-all"
-                    title={shapeId}
-                  >
-                    {shapePreviews[shapeId] ? (
-                      <img
-                        src={shapePreviews[shapeId]}
-                        alt={shapeId}
-                        className="w-full h-full object-contain"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-gray-200 rounded flex items-center justify-center">
-                        <span className="text-xs text-gray-400">?</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                {availableShapes.nautical.slice(0, 26).map((shapeId) => {
+                  const isActive = config.shapes.includes(shapeId as ShapeType);
+                  
+                  return (
+                    <div
+                      key={shapeId}
+                      className={`aspect-square bg-gray-700 rounded-lg border-2 cursor-pointer flex items-center justify-center overflow-hidden p-2 transition-all ${
+                        isActive 
+                          ? 'border-[#3E8AE2]' 
+                          : 'border-transparent hover:border-blue-500 opacity-40'
+                      }`}
+                      title={shapeId}
+                    >
+                      {shapePreviews[shapeId] ? (
+                        <img
+                          src={shapePreviews[shapeId]}
+                          alt={shapeId}
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gray-200 rounded flex items-center justify-center">
+                          <span className="text-xs text-gray-400">?</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -677,7 +734,7 @@ export default function PatternGenerator() {
             className="px-5 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             title="Undo (Cmd/Ctrl + Z)"
           >
-            Undo
+Undo
           </button>
           <button
             onClick={handleRedo}
@@ -685,7 +742,7 @@ export default function PatternGenerator() {
             className="px-5 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-600 font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             title="Redo (Cmd/Ctrl + Shift + Z)"
           >
-            Redo
+Redo
           </button>
           <div className="w-px bg-gray-600 self-stretch" />
           <button
@@ -725,21 +782,21 @@ export default function PatternGenerator() {
         {/* Canvas */}
         <div 
           className="rounded-lg shadow-2xl overflow-hidden flex items-center justify-center mx-auto"
-          style={{
+              style={{
             width: `${displayWidth}px`,
             height: `${displayHeight}px`,
-            maxWidth: '100%',
-            maxHeight: `${maxDisplayHeight}px`,
+                maxWidth: '100%',
+                maxHeight: `${maxDisplayHeight}px`,
             backgroundColor: config.backgroundColor,
           }}
         >
           {svgContent ? (
             <div 
               className="w-full h-full flex items-center justify-center"
-              style={{
-                minWidth: 0,
-                minHeight: 0,
-              }}
+                  style={{
+                    minWidth: 0,
+                    minHeight: 0,
+                  }}
               dangerouslySetInnerHTML={{ __html: svgContent }} 
             />
           ) : (
@@ -790,9 +847,9 @@ export default function PatternGenerator() {
                     dragOverBackgroundColor ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-800' : ''
                   }`}
                 >
-                  <input
-                    type="color"
-                    value={config.backgroundColor}
+                <input
+                  type="color"
+                  value={config.backgroundColor}
                     onChange={(e) => {
                       setSyncBackgroundColor(false);
                       setConfig(prev => ({ ...prev, backgroundColor: e.target.value }));
@@ -801,9 +858,9 @@ export default function PatternGenerator() {
                   />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <input
-                    type="text"
-                    value={config.backgroundColor.toUpperCase()}
+                <input
+                  type="text"
+                  value={config.backgroundColor.toUpperCase()}
                     onChange={handleBackgroundColorHexChange}
                     onFocus={handleBackgroundColorHexFocus}
                     onClick={handleBackgroundColorHexClick}
@@ -814,17 +871,17 @@ export default function PatternGenerator() {
                     className={`w-full px-3 py-2 text-sm font-mono text-white bg-gray-700 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${
                       dragOverBackgroundColor ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-gray-800' : ''
                     }`}
-                    placeholder="#FFFFFF"
-                  />
-                </div>
+                  placeholder="#FFFFFF"
+                />
+              </div>
               </div>
             </div>
             
             <PaletteSelector 
               currentColors={config.colors}
               onPaletteSelect={(colors) => {
-                setConfig(prev => ({
-                  ...prev,
+                      setConfig(prev => ({
+                        ...prev,
                   colors,
                   backgroundColor: syncBackgroundColor ? colors[0] : prev.backgroundColor,
                 }));
@@ -860,35 +917,35 @@ export default function PatternGenerator() {
               />
               <span className="text-gray-300 text-sm font-medium">Enable Border</span>
             </label>
-
+            
             {config.stroke?.enabled && (
               <>
                 {/* Border Width */}
                 <div className="mb-4">
                   <label className="text-gray-300 text-sm font-medium mb-2 block">
                     Border Width (1-12px)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
+                </label>
+                <input
+                  type="number"
+                  min="1"
                     max="12"
-                    value={config.stroke?.width || 1}
-                    onChange={(e) => {
+                  value={config.stroke?.width || 1}
+                  onChange={(e) => {
                       const value = Math.max(1, Math.min(12, parseInt(e.target.value) || 1));
-                      setConfig(prev => ({
-                        ...prev,
+                    setConfig(prev => ({
+                      ...prev,
                         stroke: { ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), width: value }
-                      }));
-                    }}
+                    }));
+                  }}
                     className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600"
-                  />
+                />
                 </div>
-
+                
                 {/* Border Color */}
                 <div>
                   <label className="text-gray-300 text-sm font-medium mb-2 block">
-                    Border Color
-                  </label>
+                  Border Color
+                </label>
                   <div className="flex items-center gap-2">
                     <div
                       draggable
@@ -900,20 +957,20 @@ export default function PatternGenerator() {
                         dragOverBorderColor ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-gray-800' : ''
                       }`}
                     >
-                      <input
-                        type="color"
-                        value={config.stroke?.color || '#000000'}
-                        onChange={(e) => setConfig(prev => ({
-                          ...prev,
+                  <input
+                    type="color"
+                    value={config.stroke?.color || '#000000'}
+                    onChange={(e) => setConfig(prev => ({
+                      ...prev,
                           stroke: { ...(prev.stroke || { enabled: true, width: 1, color: '#000000' }), color: e.target.value }
-                        }))}
+                    }))}
                         className="w-12 h-10 rounded border-0 bg-transparent cursor-pointer"
-                      />
+                  />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <input
-                        type="text"
-                        value={(config.stroke?.color || '#000000').toUpperCase()}
+                  <input
+                    type="text"
+                    value={(config.stroke?.color || '#000000').toUpperCase()}
                         onChange={handleBorderColorHexChange}
                         onFocus={handleBorderColorHexFocus}
                         onClick={handleBorderColorHexClick}
@@ -925,9 +982,9 @@ export default function PatternGenerator() {
                           dragOverBorderColor ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-gray-800' : ''
                         }`}
                         placeholder="#FFFFFF"
-                      />
-                    </div>
-                  </div>
+                  />
+                </div>
+              </div>
                 </div>
               </>
             )}
@@ -937,18 +994,18 @@ export default function PatternGenerator() {
           <div>
             <h3 className="text-white text-lg font-semibold mb-4">Export</h3>
             <div className="space-y-2">
-              <button
+              <button 
                 onClick={handleCopySVG}
                 className="w-full px-4 py-2 text-sm font-medium text-white bg-gray-700 rounded hover:bg-gray-600 transition-colors"
               >
-                Copy SVG
+Copy SVG
               </button>
-              <button
+                <button
                 onClick={handleExportSVG}
                 className="w-full px-4 py-2 text-sm font-medium text-white bg-gray-700 rounded hover:bg-gray-600 transition-colors"
-              >
-                Export SVG
-              </button>
+                >
+Export SVG
+                      </button>
             </div>
           </div>
         </div>
