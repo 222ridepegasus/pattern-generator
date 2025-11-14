@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { PatternConfig, ShapeType } from '../lib/types';
-import { generatePattern, patternToSVG } from '../lib/patternEngine';
+import { generatePattern, patternToSVG, calculatePatternLayout } from '../lib/patternEngine';
 import { availableShapes } from '../lib/shapeLoader.js';
 import { COLOR_PALETTES } from '../lib/types';
 import ColorPickers from './ColorPickers';
@@ -72,6 +72,7 @@ export default function PatternGenerator() {
 
   const [patternCells, setPatternCells] = useState<Record<string, CellData | null>>({});
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
+  const [hoveredCell, setHoveredCell] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>('');
   const [syncBackgroundColor, setSyncBackgroundColor] = useState(true);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
@@ -270,6 +271,33 @@ export default function PatternGenerator() {
     setDragOverBorderColor(false);
   };
 
+  // Handle cell click for selection
+  const handleCellClick = (row: number, col: number, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent canvas click from deselecting
+    const cellKey = `${row}_${col}`;
+    
+    if (e.shiftKey) {
+      // Shift+Click: Toggle cell in selection (add or remove)
+      setSelectedCells(prev => {
+        const newSelection = new Set(prev);
+        if (newSelection.has(cellKey)) {
+          newSelection.delete(cellKey);
+        } else {
+          newSelection.add(cellKey);
+        }
+        return newSelection;
+      });
+    } else {
+      // Normal click: Replace selection with just this cell
+      setSelectedCells(new Set([cellKey]));
+    }
+  };
+
+  // Handle canvas click to deselect all
+  const handleCanvasClick = () => {
+    setSelectedCells(new Set());
+  };
+
   // Track window size for responsive canvas display
   useEffect(() => {
     const handleResize = () => {
@@ -453,6 +481,51 @@ export default function PatternGenerator() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [historyIndex, history]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keyboard shortcuts for delete
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Only delete if we have selected cells and not focused on an input
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+          return; // Don't interfere with input fields
+        }
+        
+        if (selectedCells.size > 0) {
+          e.preventDefault();
+          
+          // Create new cells object with selected cells set to null
+          const newCells: Record<string, CellData | null> = { ...patternCells };
+          selectedCells.forEach(cellKey => {
+            newCells[cellKey] = null;
+          });
+          
+          // Count which shapes are still present in the grid after deletion
+          const remainingShapes = new Set<string>();
+          Object.values(newCells).forEach(cell => {
+            if (cell && cell.shapeId) {
+              remainingShapes.add(cell.shapeId);
+            }
+          });
+          
+          // Update config.shapes to only include shapes still in use
+          const updatedShapes = config.shapes.filter(shapeId => 
+            remainingShapes.has(shapeId)
+          ) as ShapeType[];
+          
+          setPatternCells(newCells);
+          if (updatedShapes.length !== config.shapes.length) {
+            setConfig(prev => ({ ...prev, shapes: updatedShapes }));
+          }
+          setSelectedCells(new Set()); // Clear selection after delete
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedCells, patternCells, config.shapes]);
+
   // Auto-randomize on first load
   useEffect(() => {
     handleRandomizeAll();
@@ -506,23 +579,30 @@ export default function PatternGenerator() {
   };
 
   const handleShuffle = () => {
-    const currentShapes = Object.values(patternCells).filter(cell => cell !== null);
-    if (currentShapes.length === 0) return;
-    
-    const shuffled = [...currentShapes].sort(() => Math.random() - 0.5);
-    const newCells: Record<string, CellData | null> = {};
     const gridSize = config.gridSize;
-    let shapeIndex = 0;
+    const totalCells = gridSize * gridSize;
+    
+    // Collect ALL cells (both filled and empty) in order
+    const allCells: (CellData | null)[] = [];
+    for (let row = 0; row < gridSize; row++) {
+      for (let col = 0; col < gridSize; col++) {
+        const cellKey = `${row}_${col}`;
+        allCells.push(patternCells[cellKey] || null);
+      }
+    }
+    
+    // Shuffle ALL cells (including nulls/empty)
+    const shuffled = [...allCells].sort(() => Math.random() - 0.5);
+    
+    // Redistribute shuffled cells back to grid
+    const newCells: Record<string, CellData | null> = {};
+    let cellIndex = 0;
     
     for (let row = 0; row < gridSize; row++) {
       for (let col = 0; col < gridSize; col++) {
         const cellKey = `${row}_${col}`;
-        if (shapeIndex < shuffled.length) {
-          newCells[cellKey] = shuffled[shapeIndex];
-          shapeIndex++;
-        } else {
-          newCells[cellKey] = null;
-        }
+        newCells[cellKey] = shuffled[cellIndex];
+        cellIndex++;
       }
     }
     
@@ -530,23 +610,54 @@ export default function PatternGenerator() {
   };
 
   const handleRandomShapes = () => {
-    // Keep current shape subset (don't change config.shapes)
-    // Only replace shapes in cells with random from CURRENT subset
-    if (config.shapes.length === 0) return; // Safety check
-    
-    const newCells: Record<string, CellData | null> = {};
-    const randomShape = () => config.shapes[Math.floor(Math.random() * config.shapes.length)];
-    
-    // Iterate through all cells in the grid (not just existing patternCells)
+    // Step 1: Count unique shape types currently on the grid
+    const uniqueShapes = new Set<string>();
     const gridSize = config.gridSize;
+    
     for (let row = 0; row < gridSize; row++) {
       for (let col = 0; col < gridSize; col++) {
         const cellKey = `${row}_${col}`;
         const cell = patternCells[cellKey];
-    if (cell) {
-          // Replace shape with random from current subset
-          newCells[cellKey] = { ...cell, shapeId: randomShape() };
-      } else {
+        if (cell) {
+          uniqueShapes.add(cell.shapeId);
+        }
+      }
+    }
+    
+    const uniqueShapeCount = uniqueShapes.size;
+    if (uniqueShapeCount === 0) return; // No shapes to replace
+    
+    // Step 2: Pick that many random shapes from all 26 nautical shapes
+    const allShapes = [...availableShapes.nautical];
+    const shuffled = allShapes.sort(() => Math.random() - 0.5);
+    const newShapeSet = shuffled.slice(0, uniqueShapeCount) as ShapeType[];
+    
+    // Step 3: Create a 1-to-1 mapping: oldShape → newShape
+    const shapeMapping = new Map<string, string>();
+    const oldShapeArray = Array.from(uniqueShapes);
+    oldShapeArray.forEach((oldShape, index) => {
+      shapeMapping.set(oldShape, newShapeSet[index]);
+    });
+    
+    // Step 4: Update config.shapes with the new shape set
+    setConfig(prev => ({ ...prev, shapes: newShapeSet }));
+    
+    // Step 5: Replace all instances using the mapping (keep layout and colors the same)
+    const newCells: Record<string, CellData | null> = {};
+    
+    for (let row = 0; row < gridSize; row++) {
+      for (let col = 0; col < gridSize; col++) {
+        const cellKey = `${row}_${col}`;
+        const cell = patternCells[cellKey];
+        if (cell) {
+          // Map old shape to new shape
+          const newShapeId = shapeMapping.get(cell.shapeId) || cell.shapeId;
+          newCells[cellKey] = { 
+            ...cell, 
+            shapeId: newShapeId
+            // Keep bgColorIndex and fgColorIndex unchanged
+          };
+        } else {
           // Keep empty cells empty
           newCells[cellKey] = null;
         }
@@ -725,9 +836,15 @@ export default function PatternGenerator() {
       </div>
 
       {/* CENTER - Canvas with Floating Buttons */}
-      <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative overflow-y-auto custom-scrollbar">
+      <div 
+        className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative overflow-y-auto custom-scrollbar"
+        onClick={handleCanvasClick}
+      >
         {/* Floating Randomization Buttons */}
-        <div className="absolute top-4 md:top-6≤≥ left-1/2 transform -translate-x-1/2 z-10 flex gap-3 bg-gray-800/90 backdrop-blur px-2 py-2 rounded-lg shadow-lg">
+        <div 
+          className="absolute top-4 md:top-6≤≥ left-1/2 transform -translate-x-1/2 z-10 flex gap-3 bg-gray-800/90 backdrop-blur px-2 py-2 rounded-lg shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
           <button
             onClick={handleUndo}
             disabled={historyIndex <= 0}
@@ -781,7 +898,7 @@ Redo
 
         {/* Canvas */}
         <div 
-          className="rounded-lg shadow-2xl overflow-hidden flex items-center justify-center mx-auto"
+          className="rounded-lg shadow-2xl overflow-hidden flex items-center justify-center mx-auto relative"
               style={{
             width: `${displayWidth}px`,
             height: `${displayHeight}px`,
@@ -791,14 +908,64 @@ Redo
           }}
         >
           {svgContent ? (
-            <div 
-              className="w-full h-full flex items-center justify-center"
-                  style={{
-                    minWidth: 0,
-                    minHeight: 0,
-                  }}
-              dangerouslySetInnerHTML={{ __html: svgContent }} 
-            />
+            <>
+              <div 
+                className="w-full h-full flex items-center justify-center"
+                    style={{
+                      minWidth: 0,
+                      minHeight: 0,
+                    }}
+                dangerouslySetInnerHTML={{ __html: svgContent }} 
+              />
+              
+              {/* Invisible overlay grid for clicking */}
+              {(() => {
+                const layout = calculatePatternLayout(config);
+                const { tileSize, offsetX, offsetY } = layout;
+                const { lineSpacing = 0, gridSize = 4 } = config;
+                
+                // Calculate scale factor for overlay positioning
+                const overlayScale = scale;
+                
+                return (
+                  <>
+                    {Array.from({ length: gridSize }, (_, row) =>
+                      Array.from({ length: gridSize }, (_, col) => {
+                        const cellKey = `${row}_${col}`;
+                        const isSelected = selectedCells.has(cellKey);
+                        
+                        // Calculate position: start from offsetX/offsetY, add (tileSize + lineSpacing) per cell
+                        const x = offsetX + col * (tileSize + lineSpacing);
+                        const y = offsetY + row * (tileSize + lineSpacing);
+                        
+                        const isHovered = hoveredCell === cellKey;
+                        const showBorder = isSelected || isHovered;
+                        
+                        return (
+                          <div
+                            key={cellKey}
+                            onClick={(e) => handleCellClick(row, col, e)}
+                            onMouseEnter={() => setHoveredCell(cellKey)}
+                            onMouseLeave={() => setHoveredCell(null)}
+                            className="absolute cursor-pointer"
+                            style={{
+                              left: `${x * overlayScale}px`,
+                              top: `${y * overlayScale}px`,
+                              width: `${tileSize * overlayScale}px`,
+                              height: `${tileSize * overlayScale}px`,
+                              pointerEvents: 'all',
+                              backgroundColor: 'transparent',
+                              outline: showBorder ? '3px solid #3E8AE2' : 'none',
+                              outlineOffset: showBorder ? '-1.5px' : '0',
+                            }}
+                          />
+                        );
+                      })
+                    )}
+                  </>
+                );
+              })()}
+            </>
           ) : (
             <div className="flex items-center justify-center text-gray-400 w-full h-full">
               Empty Grid
