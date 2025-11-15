@@ -143,7 +143,7 @@ export async function loadShapeWithColors(shapeId, bgColor, fgColor) {
     for (const cell of cells) {
       if (!cell || !cell.shapeId) continue;
   
-      const { row, col, shapeId, bgColorIndex = 0, fgColorIndex = 1 } = cell;
+      const { row, col, shapeId, bgColorIndex = 0, fgColorIndex = 1, rotation = 0, flipH = false, flipV = false } = cell;
   
       // Get colors from theme
       const bgColor = colors[bgColorIndex] || colors[0];
@@ -189,12 +189,33 @@ export async function loadShapeWithColors(shapeId, bgColor, fgColor) {
         const svgCenterX = svgWidth / 2;
         const svgCenterY = svgHeight / 2;
         
+        // Build transform string with rotation and flip
+        // Transform order: translate to tile center, rotate, flip (scale), scale, translate back by negative SVG center
+        let transformParts = [`translate(${tileCenterX}, ${tileCenterY})`];
+        
+        // Add rotation if needed
+        if (rotation !== 0) {
+          transformParts.push(`rotate(${rotation})`);
+        }
+        
+        // Add flip transforms if needed (scale(-1, 1) for horizontal, scale(1, -1) for vertical)
+        if (flipH && flipV) {
+          transformParts.push(`scale(-1, -1)`);
+        } else if (flipH) {
+          transformParts.push(`scale(-1, 1)`);
+        } else if (flipV) {
+          transformParts.push(`scale(1, -1)`);
+        }
+        
+        // Add scale and final translate
+        transformParts.push(`scale(${scale})`);
+        transformParts.push(`translate(${-svgCenterX}, ${-svgCenterY})`);
+        
         // Create group element for positioning and scaling
-        // Transform: translate to tile center, scale, then offset by negative SVG center
         const group = {
           type: 'g',
           attrs: {
-            transform: `translate(${tileCenterX}, ${tileCenterY}) scale(${scale}) translate(${-svgCenterX}, ${-svgCenterY})`,
+            transform: transformParts.join(' '),
             'data-cell-key': `${row}_${col}`,
             'data-cell-index': (row * gridSize + col).toString(),
           },

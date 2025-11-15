@@ -74,12 +74,17 @@ export default function PatternGenerator() {
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
   const [hoveredCell, setHoveredCell] = useState<string | null>(null);
   const [svgContent, setSvgContent] = useState<string>('');
+  const [copiedCell, setCopiedCell] = useState<CellData | null | undefined>(undefined);
   const [syncBackgroundColor, setSyncBackgroundColor] = useState(true);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [dragOverBackgroundColor, setDragOverBackgroundColor] = useState(false);
   const [dragOverBorderColor, setDragOverBorderColor] = useState(false);
   const [shapePreviews, setShapePreviews] = useState<Record<string, string>>({});
   const [shapesLoading, setShapesLoading] = useState(true);
+  
+  // Marquee selection state
+  const [marqueeStart, setMarqueeStart] = useState<{x: number, y: number} | null>(null);
+  const [marqueeEnd, setMarqueeEnd] = useState<{x: number, y: number} | null>(null);
   
   // Undo/Redo state
   type HistoryState = {
@@ -298,6 +303,35 @@ export default function PatternGenerator() {
     setSelectedCells(new Set());
   };
 
+  // Get cells within marquee rectangle
+  const getCellsInMarquee = (startX: number, startY: number, endX: number, endY: number): Set<string> => {
+    const cells = new Set<string>();
+    const layout = calculatePatternLayout(config);
+    const { tileSize, offsetX, offsetY } = layout;
+    const spacing = config.lineSpacing;
+
+    const minX = Math.min(startX, endX);
+    const maxX = Math.max(startX, endX);
+    const minY = Math.min(startY, endY);
+    const maxY = Math.max(startY, endY);
+
+    for (let row = 0; row < config.gridSize; row++) {
+      for (let col = 0; col < config.gridSize; col++) {
+        const cellX = offsetX + col * (tileSize + spacing);
+        const cellY = offsetY + row * (tileSize + spacing);
+        const cellRight = cellX + tileSize;
+        const cellBottom = cellY + tileSize;
+
+        // Check if marquee intersects this cell
+        if (maxX >= cellX && minX <= cellRight && maxY >= cellY && minY <= cellBottom) {
+          cells.add(`${row}_${col}`);
+        }
+      }
+    }
+
+    return cells;
+  };
+
   // Track window size for responsive canvas display
   useEffect(() => {
     const handleResize = () => {
@@ -411,6 +445,9 @@ export default function PatternGenerator() {
           shapeId: string;
           bgColorIndex: number;
           fgColorIndex: number;
+          rotation: number;
+          flipH: boolean;
+          flipV: boolean;
         }> = [];
 
         const gridSize = config.gridSize;
@@ -427,6 +464,9 @@ export default function PatternGenerator() {
                 shapeId: cell.shapeId,
                 bgColorIndex: cell.bgColorIndex,
                 fgColorIndex: cell.fgColorIndex,
+                rotation: cell.rotation,
+                flipH: cell.flipH,
+                flipV: cell.flipV,
               });
             }
           }
@@ -614,6 +654,201 @@ export default function PatternGenerator() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedCells, patternCells, config.gridSize]);
+
+  // Keyboard shortcuts for rotating and flipping selected cells (Q/E/H/V)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase();
+      
+      if (['q', 'e', 'h', 'v'].includes(key)) {
+        // Only transform if we have selected cells and not focused on an input
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+          return; // Don't interfere with input fields
+        }
+        
+        if (selectedCells.size === 0) return;
+        
+        e.preventDefault();
+        
+        // Update the shape instances inside the selected cells
+        const newCells: Record<string, CellData | null> = { ...patternCells };
+        
+        selectedCells.forEach(cellKey => {
+          const cell = patternCells[cellKey];
+          if (!cell) return; // Skip empty cells
+          
+          // Create a new cell object with updated properties
+          if (key === 'q') {
+            // Rotate left (counterclockwise)
+            const newRotation = (cell.rotation - 90) % 360;
+            newCells[cellKey] = {
+              ...cell,
+              rotation: newRotation < 0 ? newRotation + 360 : newRotation
+            };
+          } else if (key === 'e') {
+            // Rotate right (clockwise)
+            const newRotation = (cell.rotation + 90) % 360;
+            newCells[cellKey] = {
+              ...cell,
+              rotation: newRotation < 0 ? newRotation + 360 : newRotation
+            };
+          } else if (key === 'h') {
+            // Flip horizontal
+            newCells[cellKey] = {
+              ...cell,
+              flipH: !cell.flipH
+            };
+          } else if (key === 'v') {
+            // Flip vertical
+            newCells[cellKey] = {
+              ...cell,
+              flipV: !cell.flipV
+            };
+          }
+        });
+        
+        setPatternCells(newCells);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedCells, patternCells]);
+
+  // Keyboard shortcuts for copy/cut/paste (CMD+C/X/V on Mac, CTRL+C/X/V on PC)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't interfere with input fields
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+      
+      // Check for CMD (Mac) or CTRL (PC) modifier
+      const isModifierPressed = e.metaKey || e.ctrlKey;
+      if (!isModifierPressed) return;
+      
+      // Check the key FIRST (before processing modifier-only events)
+      const key = e.key.toLowerCase();
+      const code = e.code.toLowerCase();
+      
+      // Only process c, x, or v keys (ignore modifier-only events like just "Meta")
+      if (key !== 'c' && key !== 'x' && key !== 'v' && code !== 'keyc' && code !== 'keyx' && code !== 'keyv') {
+        return;
+      }
+      
+      console.log('[DEBUG] Copy/Cut/Paste: Key detected:', key, 'code:', code, 'Modifier:', isModifierPressed, 'Selected cells:', selectedCells.size);
+      
+      // Prevent default browser behavior
+      e.preventDefault();
+      e.stopPropagation();
+      
+      if (key === 'c' || code === 'keyc') {
+        // Copy: Only works when exactly ONE tile is selected
+        console.log('[DEBUG] Copy: Selected cells count:', selectedCells.size);
+        
+        if (selectedCells.size === 1) {
+          const cellKey = Array.from(selectedCells)[0];
+          const cell = patternCells[cellKey];
+          
+          console.log('[DEBUG] Copy: Copying cell:', cellKey, 'Cell data:', cell);
+          
+          // Copy the cell (can be null for empty cells)
+          setCopiedCell(cell ? { ...cell } : null);
+          
+          console.log('[DEBUG] Copy: Clipboard set to:', cell ? { ...cell } : null);
+        } else {
+          console.log('[DEBUG] Copy: Blocked - need exactly 1 cell selected, got:', selectedCells.size);
+        }
+      } else if (key === 'x' || code === 'keyx') {
+        // Cut: Only works when exactly ONE tile is selected
+        console.log('[DEBUG] Cut: Selected cells count:', selectedCells.size);
+        
+        if (selectedCells.size === 1) {
+          const cellKey = Array.from(selectedCells)[0];
+          const cell = patternCells[cellKey];
+          
+          console.log('[DEBUG] Cut: Cutting cell:', cellKey, 'Cell data:', cell);
+          
+          // Copy the cell (can be null for empty cells)
+          setCopiedCell(cell ? { ...cell } : null);
+          
+          console.log('[DEBUG] Cut: Clipboard set to:', cell ? { ...cell } : null);
+          
+          // Delete the cell (set to null)
+          const newCells: Record<string, CellData | null> = { ...patternCells };
+          newCells[cellKey] = null;
+          
+          console.log('[DEBUG] Cut: Cell deleted from grid');
+          
+          // Update shapes list if needed
+          const remainingShapes = new Set<string>();
+          Object.values(newCells).forEach(cell => {
+            if (cell && cell.shapeId) {
+              remainingShapes.add(cell.shapeId);
+            }
+          });
+          const updatedShapes = config.shapes.filter(shapeId => 
+            remainingShapes.has(shapeId)
+          ) as ShapeType[];
+          
+          setPatternCells(newCells);
+          if (updatedShapes.length !== config.shapes.length) {
+            setConfig(prev => ({ ...prev, shapes: updatedShapes }));
+            console.log('[DEBUG] Cut: Updated shapes list');
+          }
+        } else {
+          console.log('[DEBUG] Cut: Blocked - need exactly 1 cell selected, got:', selectedCells.size);
+        }
+      } else if (key === 'v' || code === 'keyv') {
+        // Paste: Works when any number of tiles are selected
+        console.log('[DEBUG] Paste: Handler triggered!');
+        console.log('[DEBUG] Paste: Selected cells count:', selectedCells.size);
+        console.log('[DEBUG] Paste: Clipboard state:', copiedCell);
+        console.log('[DEBUG] Paste: Clipboard is undefined?', copiedCell === undefined);
+        console.log('[DEBUG] Paste: Clipboard is null?', copiedCell === null);
+        
+        // Only paste if we've actually copied something (copiedCell !== undefined)
+        if (selectedCells.size > 0 && copiedCell !== undefined) {
+          console.log('[DEBUG] Paste: Pasting to', selectedCells.size, 'cells');
+          
+          const newCells: Record<string, CellData | null> = { ...patternCells };
+          
+          selectedCells.forEach(cellKey => {
+            // Paste the copied cell (can be null for empty cells)
+            if (copiedCell === null) {
+              console.log('[DEBUG] Paste: Pasting empty cell to', cellKey);
+              newCells[cellKey] = null;
+            } else {
+              console.log('[DEBUG] Paste: Pasting shape', copiedCell.shapeId, 'to', cellKey);
+              // Create a fresh copy for each cell
+              newCells[cellKey] = { ...copiedCell };
+              
+              // Ensure the shape is in the config.shapes list
+              if (copiedCell.shapeId && !config.shapes.includes(copiedCell.shapeId as ShapeType)) {
+                console.log('[DEBUG] Paste: Adding shape to config.shapes:', copiedCell.shapeId);
+                setConfig(prev => ({ ...prev, shapes: [...prev.shapes, copiedCell.shapeId as ShapeType] }));
+              }
+            }
+          });
+          
+          console.log('[DEBUG] Paste: Updating patternCells with new data');
+          setPatternCells(newCells);
+        } else {
+          if (selectedCells.size === 0) {
+            console.log('[DEBUG] Paste: Blocked - no cells selected');
+          }
+          if (copiedCell === undefined) {
+            console.log('[DEBUG] Paste: Blocked - nothing in clipboard (undefined)');
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true); // Use capture phase to catch before browser
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [selectedCells, patternCells, copiedCell, config.shapes]);
 
   // Initialize grid on first load with random shapes
   useEffect(() => {
@@ -947,6 +1182,65 @@ export default function PatternGenerator() {
         data-canvas-container="true"
         className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative overflow-y-auto custom-scrollbar"
         onClick={handleCanvasClick}
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.getAttribute('data-cell-overlay')) return; // Don't start on cell overlays
+
+          const container = e.currentTarget;
+          const svg = container.querySelector('svg');
+          if (!svg) return;
+
+          const rect = svg.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+
+          setMarqueeStart({ x, y });
+          setMarqueeEnd({ x, y });
+        }}
+        onMouseMove={(e) => {
+          if (!marqueeStart) return;
+
+          const container = e.currentTarget;
+          const svg = container.querySelector('svg');
+          if (!svg) return;
+
+          const rect = svg.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+
+          setMarqueeEnd({ x, y });
+        }}
+        onMouseUp={(e) => {
+          if (!marqueeStart || !marqueeEnd) {
+            setMarqueeStart(null);
+            setMarqueeEnd(null);
+            return;
+          }
+
+          const container = e.currentTarget;
+          const svg = container.querySelector('svg');
+          if (!svg) return;
+
+          const rect = svg.getBoundingClientRect();
+          const [viewBoxWidth, viewBoxHeight] = config.containerSize;
+
+          // Convert screen coords to SVG viewBox coords
+          const startSvgX = (marqueeStart.x / rect.width) * viewBoxWidth;
+          const startSvgY = (marqueeStart.y / rect.height) * viewBoxHeight;
+          const endSvgX = (marqueeEnd.x / rect.width) * viewBoxWidth;
+          const endSvgY = (marqueeEnd.y / rect.height) * viewBoxHeight;
+
+          const cells = getCellsInMarquee(startSvgX, startSvgY, endSvgX, endSvgY);
+
+          if (e.shiftKey) {
+            setSelectedCells(prev => new Set([...prev, ...cells]));
+          } else {
+            setSelectedCells(cells);
+          }
+
+          setMarqueeStart(null);
+          setMarqueeEnd(null);
+        }}
       >
         {/* Floating Randomization Buttons */}
         <div 
@@ -1056,16 +1350,13 @@ Redo
                         const screenWidth = (cellWidth / viewBoxWidth) * displayWidth;
                         const screenHeight = (cellHeight / viewBoxHeight) * displayHeight;
                         
-                        const isHovered = hoveredCell === cellKey;
-                        const showBorder = isSelected || isHovered;
+                        const showBorder = isSelected;
                         
                         return (
                           <div
                             key={cellKey}
                             data-cell-overlay="true"
                             onClick={(e) => handleCellClick(row, col, e)}
-                            onMouseEnter={() => setHoveredCell(cellKey)}
-                            onMouseLeave={() => setHoveredCell(null)}
                             className="absolute cursor-pointer"
                             style={{
                               left: `${screenLeft}px`,
@@ -1084,6 +1375,23 @@ Redo
                   </>
                 );
               })()}
+              
+              {/* Marquee selection rectangle */}
+              {marqueeStart && marqueeEnd && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: `${Math.min(marqueeStart.x, marqueeEnd.x)}px`,
+                    top: `${Math.min(marqueeStart.y, marqueeEnd.y)}px`,
+                    width: `${Math.abs(marqueeEnd.x - marqueeStart.x)}px`,
+                    height: `${Math.abs(marqueeEnd.y - marqueeStart.y)}px`,
+                    border: '2px dashed #3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    pointerEvents: 'none',
+                    zIndex: 1000,
+                  }}
+                />
+              )}
             </>
           ) : (
             <div className="flex items-center justify-center text-gray-400 w-full h-full">
