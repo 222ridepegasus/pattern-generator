@@ -566,89 +566,93 @@ export default function PatternGenerator() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedCells, patternCells, config.shapes]);
 
-  // Keyboard shortcuts for moving cells with arrow keys
+  // Keyboard shortcuts for moving cells with arrow keys or WASD
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        // Only move if we have selected cells and not focused on an input
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-          return; // Don't interfere with input fields
+      const key = e.key.toLowerCase();
+      const isArrowKey = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key);
+      const isWASD = ['w', 'a', 's', 'd'].includes(key);
+      
+      if (!isArrowKey && !isWASD) return;
+      
+      // Only move if we have selected cells and not focused on an input
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return; // Don't interfere with input fields
+      }
+      
+      if (selectedCells.size === 0) return;
+      
+      e.preventDefault();
+      
+      const gridSize = config.gridSize;
+      
+      // Determine direction offset
+      let rowOffset = 0;
+      let colOffset = 0;
+      if (e.key === 'ArrowUp' || key === 'w') rowOffset = -1;
+      if (e.key === 'ArrowDown' || key === 's') rowOffset = 1;
+      if (e.key === 'ArrowLeft' || key === 'a') colOffset = -1;
+      if (e.key === 'ArrowRight' || key === 'd') colOffset = 1;
+      
+      // Parse selected cells and calculate new positions
+      const selectedPositions: Array<{oldKey: string, oldRow: number, oldCol: number, newRow: number, newCol: number}> = [];
+      let canMove = true;
+      
+      selectedCells.forEach(cellKey => {
+        const [rowStr, colStr] = cellKey.split('_');
+        const oldRow = parseInt(rowStr);
+        const oldCol = parseInt(colStr);
+        const newRow = oldRow + rowOffset;
+        const newCol = oldCol + colOffset;
+        
+        // Check if new position is out of bounds
+        if (newRow < 0 || newRow >= gridSize || newCol < 0 || newCol >= gridSize) {
+          canMove = false;
         }
         
-        if (selectedCells.size === 0) return;
+        selectedPositions.push({ oldKey: cellKey, oldRow, oldCol, newRow, newCol });
+      });
+      
+      // If any cell would go out of bounds, don't move
+      if (!canMove) return;
+      
+      // Perform the swap
+      const newCells: Record<string, CellData | null> = { ...patternCells };
+      const newSelection = new Set<string>();
+      
+      // First, collect what's at the new positions (to swap)
+      const swapData: Record<string, CellData | null> = {};
+      selectedPositions.forEach(({ newRow, newCol }) => {
+        const newKey = `${newRow}_${newCol}`;
+        swapData[newKey] = newCells[newKey];
+      });
+      
+      // Move selected cells to new positions
+      selectedPositions.forEach(({ oldKey, oldRow, oldCol, newRow, newCol }) => {
+        const newKey = `${newRow}_${newCol}`;
         
-        e.preventDefault();
+        // If the new position is also selected, don't swap (cells are moving together)
+        if (selectedCells.has(newKey)) {
+          // Just move the cell
+          newCells[newKey] = patternCells[oldKey];
+        } else {
+          // Swap: move selected cell to new position, displaced cell to old position
+          newCells[newKey] = patternCells[oldKey];
+          newCells[oldKey] = swapData[newKey];
+        }
         
-        const gridSize = config.gridSize;
-        
-        // Determine direction offset
-        let rowOffset = 0;
-        let colOffset = 0;
-        if (e.key === 'ArrowUp') rowOffset = -1;
-        if (e.key === 'ArrowDown') rowOffset = 1;
-        if (e.key === 'ArrowLeft') colOffset = -1;
-        if (e.key === 'ArrowRight') colOffset = 1;
-        
-        // Parse selected cells and calculate new positions
-        const selectedPositions: Array<{oldKey: string, oldRow: number, oldCol: number, newRow: number, newCol: number}> = [];
-        let canMove = true;
-        
-        selectedCells.forEach(cellKey => {
-          const [rowStr, colStr] = cellKey.split('_');
-          const oldRow = parseInt(rowStr);
-          const oldCol = parseInt(colStr);
-          const newRow = oldRow + rowOffset;
-          const newCol = oldCol + colOffset;
-          
-          // Check if new position is out of bounds
-          if (newRow < 0 || newRow >= gridSize || newCol < 0 || newCol >= gridSize) {
-            canMove = false;
-          }
-          
-          selectedPositions.push({ oldKey: cellKey, oldRow, oldCol, newRow, newCol });
-        });
-        
-        // If any cell would go out of bounds, don't move
-        if (!canMove) return;
-        
-        // Perform the swap
-        const newCells: Record<string, CellData | null> = { ...patternCells };
-        const newSelection = new Set<string>();
-        
-        // First, collect what's at the new positions (to swap)
-        const swapData: Record<string, CellData | null> = {};
-        selectedPositions.forEach(({ newRow, newCol }) => {
-          const newKey = `${newRow}_${newCol}`;
-          swapData[newKey] = newCells[newKey];
-        });
-        
-        // Move selected cells to new positions
-        selectedPositions.forEach(({ oldKey, oldRow, oldCol, newRow, newCol }) => {
-          const newKey = `${newRow}_${newCol}`;
-          
-          // If the new position is also selected, don't swap (cells are moving together)
-          if (selectedCells.has(newKey)) {
-            // Just move the cell
-            newCells[newKey] = patternCells[oldKey];
-          } else {
-            // Swap: move selected cell to new position, displaced cell to old position
-            newCells[newKey] = patternCells[oldKey];
-            newCells[oldKey] = swapData[newKey];
-          }
-          
-          newSelection.add(newKey);
-        });
-        
-        // Handle cells that were selected and moving (clear their old positions if not swapped)
-        selectedPositions.forEach(({ oldKey, newRow, newCol }) => {
-          const newKey = `${newRow}_${newCol}`;
-          // If old position wasn't filled by a swap, it's already handled above
-        });
-        
-        setPatternCells(newCells);
-        setSelectedCells(newSelection);
-      }
+        newSelection.add(newKey);
+      });
+      
+      // Handle cells that were selected and moving (clear their old positions if not swapped)
+      selectedPositions.forEach(({ oldKey, newRow, newCol }) => {
+        const newKey = `${newRow}_${newCol}`;
+        // If old position wasn't filled by a swap, it's already handled above
+      });
+      
+      setPatternCells(newCells);
+      setSelectedCells(newSelection);
     };
 
     window.addEventListener('keydown', handleKeyDown);
